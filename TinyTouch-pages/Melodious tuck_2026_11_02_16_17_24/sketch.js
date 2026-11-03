@@ -28,7 +28,10 @@ const PAGES = {
   "trace-instructions.html": traceInstructionsPage,
   "trace-play.html": tracePlayPage,
   "trace-result.html": traceResultPage,
-  "index.html": carPage
+  "carobs.html": carPage,
+  "carobs-instructions.html": carInstructionsPage,
+  "carobs-play.html": carPlayPage,
+  "carobs-result.html": carResultPage
 };
 
 function goTo(name) {
@@ -1929,7 +1932,7 @@ function homePage() {
       // which page each button opens (the rest just show the message for now)
       let pages = {
         trace: "trace.html",       // Trace the Path
-        car: "index.html",         // Car Obstacles
+        car: "carobs.html",         // Car Obstacles
         avatar: "info.html",       // Profile
         profile: "info.html",
         gear: "password.html",     // Settings -> Edit Password
@@ -4026,34 +4029,1219 @@ function traceResultPage() {
 }
 
 // #############################################################
-// Car Obstacles (prototype)   (was sketch.js)
+// Car Obstacles - shared bits used by all 4 car pages
+// #############################################################
+
+// how each level changes the game
+//   lanes = how many lanes, speed = how fast the cones fall,
+//   gap = frames between cones (smaller = more cones)
+const CAR_LEVELS = [
+  { name: "Easy",   lanes: 2, speed: 2.6, gap: 85, color: "#7DD87A", dark: "#2EAD5B", stars: 1 },
+  { name: "Medium", lanes: 3, speed: 3.2, gap: 72, color: "#FFE07A", dark: "#D9A400", stars: 2 },
+  { name: "Hard",   lanes: 4, speed: 3.9, gap: 62, color: "#FFB27A", dark: "#E07020", stars: 3 }
+];
+
+// how many cones come in round 1, round 2 and round 3 of every level
+const CAR_ROUND_TOTALS = [8, 10, 12];
+
+// the car, pointing up the road. (x, y) is the middle, s is the size (1 = full size)
+function drawCarSprite(x, y, s) {
+  push();
+  translate(x, y);
+  scale(s);
+  rotate(-HALF_PI);
+  noStroke();
+  fill("orange");
+  rect(-24, -26, 46, 24, 10);
+  rect(-42, -8, 84, 24, 10);
+  fill("#BFE3FF");
+  rect(-18, -21, 17, 14, 4);
+  rect(3, -21, 14, 14, 4);
+  fill("#FFD54F");
+  circle(37, 2, 7);
+  fill(40);
+  circle(-22, 17, 20);
+  circle(22, 17, 20);
+  fill(180);
+  circle(-22, 17, 8);
+  circle(22, 17, 8);
+  pop();
+}
+
+// a traffic cone
+function drawCone(x, y, s) {
+  push();
+  translate(x, y);
+  scale(s);
+  noStroke();
+  fill("#1B2A5A");
+  rect(-24, 20, 48, 8, 3);
+  fill("#FF8A3D");
+  triangle(-20, 22, 20, 22, 0, -26);
+  fill(255);
+  rect(-11, 2, 22, 7, 2);
+  pop();
+}
+
+// a little animated road: a cone falls and the car steers out of its way.
+// Used on the level select page and the instructions page.
+// Returns where the car is, so the instructions page can put a finger on it.
+function drawCarDemo(x, y, w, h, lanes) {
+  const P = 150;                               // frames for one cone to fall
+  let laneW = w / lanes;
+  let s = min(0.85, 0.6 * laneW / 53);         // car + cone size so they fit a lane
+  let laneX = n => x + (n + 0.5) * laneW;      // center of lane n (0 = leftmost)
+
+  // road
+  noStroke();
+  fill("#5E6A82");
+  rect(x, y, w, h, 12);
+
+  // lane dashes that scroll down
+  stroke("#D7EAFB");
+  strokeWeight(3);
+  let off = (frameCount * 1.5) % 40;
+  for (let i = 1; i < lanes; i++) {
+    for (let yy = y - 40 + off; yy < y + h; yy += 40) {
+      let y1 = max(yy, y);
+      let y2 = min(yy + 20, y + h);
+      if (y2 > y1) line(x + i * laneW, y1, x + i * laneW, y2);
+    }
+  }
+  noStroke();
+
+  // which cycle we are in, and how far down the cone is
+  let cycle = floor(frameCount / P);
+  let ph = (frameCount % P) / P;
+  let coneLane = cycle % lanes;
+  let carLane = (coneLane + 1) % lanes;                       // car steers to the next lane over
+  let prevCarLane = ((((cycle - 1) % lanes) + lanes) % lanes + 1) % lanes;
+
+  // car slides from its old lane to its new lane early in the cycle
+  let k = constrain(ph / 0.25, 0, 1);
+  k = k * k * (3 - 2 * k);
+  let carX = lerp(laneX(prevCarLane), laneX(carLane), k);
+  let carY = y + h - 14 - 42 * s;
+
+  let coneY = y + 12 + ph * (h - 12);
+  if (coneY < y + h - 8) drawCone(laneX(coneLane), coneY, s);
+  drawCarSprite(carX, carY, s);
+
+  return { x: carX, y: carY };
+}
+
+// #############################################################
+// 14. Car Obstacles: Select a level   (like trace.html)
 // #############################################################
 function carPage() {
+  // =============================================
+  // Tiny Touch - Select Car Obstacles page (p5.js)
+  // Pick a difficulty, then tap Start.
+  // Comes from: entry.html (Car Obstacles card), carobs-result.html (Play Again)
+  // Goes to:    entry.html (back arrow), carobs-instructions.html (Start)
+  // =============================================
+
+  let user = {};
+  let picked = 0;      // which level is chosen (0 = Easy)
+
+  // ---------- Layout ----------
+  const LEVEL_Y = 392;
+  const LEVEL_GAP = 58;
+  const BTN_Y = 640;
+
+  // ---------- Colors ----------
+  const BLUE = "#2D6CF0";
+  const BLUE_HOVER = "#4A84F5";
+  const NAVY = "#1B2A5A";
+  const GRAY = "#5E6A82";
+  const BG = "#F5F8FE";
+
   function setup() {
-      // create canvas
-      createCanvas(400, 800);
+    createCanvas(390, 760);
+    textFont("Arial");
+    user = loadUser();
+    if (user.carLevel !== undefined) picked = constrain(user.carLevel, 0, CAR_LEVELS.length - 1);
   }
 
   function draw() {
-      // skyblue backgroud
-      background(100, 200, 300);
-      // create a circle
-      circle(350, 50, 100);
-      // fill in circle
-      fill("yellow");
-      stroke("orange");
-      strokeWeight(20);
-      circle(350, 50, 100);
-      fill("black");
-      rect(100, 0, 200, 800);
+    cursor(ARROW);
+    background(BG);
 
-      //emojis
-      textSize(75);
-      text("💩", 100, 250);
-      text("🚗", mouseX, mouseY);
+    drawBackArrow();
+
+    noStroke();
+    fill(NAVY);
+    textStyle(BOLD);
+    textSize(24);
+    textAlign(CENTER, CENTER);
+    text("Car Obstacles", width / 2, 50);
+    textStyle(NORMAL);
+
+    // ----- preview card: a cone falls and the car steers away -----
+    fill(255);
+    stroke("#E3E8F1");
+    strokeWeight(1);
+    rect(30, 90, 330, 180, 18);
+    drawCarDemo(105, 104, 180, 152, CAR_LEVELS[picked].lanes);
+
+    // ----- title + how to play -----
+    noStroke();
+    fill(NAVY);
+    textStyle(BOLD);
+    textSize(22);
+    textAlign(CENTER, CENTER);
+    text("Dodge the Cones", width / 2, 305);
+    textStyle(NORMAL);
+    fill(GRAY);
+    textSize(15);
+    text("Drag your finger to steer the car.", width / 2, 333);
+
+    fill(NAVY);
+    textSize(14);
+    textStyle(BOLD);
+    textAlign(LEFT, CENTER);
+    text("Choose a level:", 34, 366);
+    textStyle(NORMAL);
+
+    // ----- difficulty buttons -----
+    for (let i = 0; i < CAR_LEVELS.length; i++) {
+      drawLevel(i, 30, LEVEL_Y + i * LEVEL_GAP);
+    }
+
+    drawButton("Start", 30, BTN_Y, 330, 56);
   }
 
-  return { setup, draw };
+  function drawLevel(i, x, y) {
+    let lv = CAR_LEVELS[i];
+    let w = 330;
+    let h = 48;
+    let on = picked === i;
+    let hover = isOver(x, y, w, h);
+    if (hover) cursor(HAND);
+
+    noStroke();
+    fill(0, 20);
+    rect(x, y + 3, w, h, 24);
+    fill(lv.color);
+    rect(x, y, w, h, 24);
+    if (on) {
+      stroke(NAVY);
+      strokeWeight(3);
+      noFill();
+      rect(x, y, w, h, 24);
+    }
+
+    // stars on the left show how hard it is
+    for (let s = 0; s < lv.stars; s++) {
+      drawStar(x + 26 + s * 20, y + h / 2, 9, 4, on ? "#FFFFFF" : lv.dark);
+    }
+
+    noStroke();
+    fill(NAVY);
+    textSize(18);
+    textStyle(on ? BOLD : NORMAL);
+    textAlign(CENTER, CENTER);
+    text(lv.name + " - " + lv.lanes + " lanes", x + w / 2, y + h / 2);
+    textStyle(NORMAL);
+
+    // check mark on the chosen one
+    if (on) {
+      stroke(NAVY);
+      strokeWeight(3);
+      line(x + w - 38, y + h / 2, x + w - 32, y + h / 2 + 6);
+      line(x + w - 32, y + h / 2 + 6, x + w - 22, y + h / 2 - 6);
+    }
+  }
+
+  // =============================================
+  // Clicks
+  // =============================================
+  function mousePressed() {
+    if (isOver(15, 30, 40, 40)) {
+      goTo("entry.html");
+      return;
+    }
+
+    for (let i = 0; i < CAR_LEVELS.length; i++) {
+      if (isOver(30, LEVEL_Y + i * LEVEL_GAP, 330, 48)) {
+        picked = i;
+        user.carLevel = i;
+        saveUser(user);
+      }
+    }
+
+    if (isOver(30, BTN_Y, 330, 56)) {
+      user.carLevel = picked;
+      user.carRound = 1;            // start at round 1 of 3
+      saveUser(user);
+      goTo("carobs-instructions.html");
+    }
+  }
+
+  // =============================================
+  // Helpers
+  // =============================================
+  function drawStar(x, y, r1, r2, col) {
+    push();
+    translate(x, y);
+    noStroke();
+    fill(col);
+    beginShape();
+    for (let i = 0; i < 10; i++) {
+      let a = -HALF_PI + i * PI / 5;
+      let r = i % 2 === 0 ? r1 : r2;
+      vertex(cos(a) * r, sin(a) * r);
+    }
+    endShape(CLOSE);
+    pop();
+  }
+
+  function drawBackArrow() {
+    let hover = isOver(15, 30, 40, 40);
+    if (hover) cursor(HAND);
+    stroke(hover ? BLUE_HOVER : NAVY);
+    strokeWeight(3);
+    noFill();
+    line(36, 40, 26, 50);
+    line(26, 50, 36, 60);
+  }
+
+  function drawButton(label, x, y, w, h) {
+    let hover = isOver(x, y, w, h);
+    let offset = hover && mouseIsPressed ? 2 : 0;
+    if (hover) cursor(HAND);
+
+    noStroke();
+    fill(0, 30);
+    rect(x, y + 4, w, h, 14);
+    fill(hover ? BLUE_HOVER : BLUE);
+    rect(x, y + offset, w, h, 14);
+
+    fill(255);
+    textAlign(CENTER, CENTER);
+    textStyle(BOLD);
+    textSize(21);
+    text(label, x + w / 2, y + h / 2 + offset);
+    textStyle(NORMAL);
+  }
+
+  function isOver(x, y, w, h) {
+    return mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+  }
+
+  // ---------- saved user info (shared by all pages) ----------
+  function loadUser() {
+    try {
+      return JSON.parse(localStorage.getItem("tinyTouchUser")) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveUser(u) {
+    try {
+      localStorage.setItem("tinyTouchUser", JSON.stringify(u));
+    } catch (e) {}
+  }
+
+  return { setup, draw, mousePressed };
+}
+
+// #############################################################
+// 15. Car Obstacles: Instructions   (like trace-instructions.html)
+// #############################################################
+function carInstructionsPage() {
+  // =============================================
+  // Tiny Touch - Car Obstacles: Instructions (p5.js)
+  // Shows how to play, then Start.
+  // Comes from: carobs.html (Start)
+  // Goes to:    carobs-play.html (Start), carobs.html (back arrow)
+  // =============================================
+
+  let user = {};
+
+  // ---------- Layout ----------
+  const BTN_Y = 640;
+
+  // ---------- Colors ----------
+  const BLUE = "#2D6CF0";
+  const BLUE_HOVER = "#4A84F5";
+  const NAVY = "#1B2A5A";
+  const GRAY = "#5E6A82";
+  const BG = "#F5F8FE";
+  const GREEN = "#2EAD5B";
+  const RED = "#E5484D";
+  const SKIN = "#F5C6A5";
+
+  function setup() {
+    createCanvas(390, 760);
+    textFont("Arial");
+    user = loadUser();
+  }
+
+  function draw() {
+    cursor(ARROW);
+    background(BG);
+
+    drawBackArrow();
+
+    noStroke();
+    fill(NAVY);
+    textStyle(BOLD);
+    textSize(24);
+    textAlign(CENTER, CENTER);
+    text("Car Obstacles", width / 2, 50);
+    textStyle(NORMAL);
+
+    // which level + round the player is on
+    let lv = CAR_LEVELS[constrain(user.carLevel || 0, 0, CAR_LEVELS.length - 1)];
+    let roundNum = user.carRound || 1;
+    let label = lv.name + "  ·  Round " + roundNum + " of 3";
+    textSize(14);
+    textStyle(BOLD);
+    let pillW = textWidth(label) + 32;     // pill grows to fit the words
+    fill(BLUE);
+    rect(width / 2 - pillW / 2, 78, pillW, 30, 15);
+    fill(255);
+    text(label, width / 2, 93);
+    textStyle(NORMAL);
+
+    // ----- demo card: the car dodges a cone, a finger drags it -----
+    fill(255);
+    stroke("#E3E8F1");
+    strokeWeight(1);
+    rect(30, 130, 330, 300, 20);
+    let car = drawCarDemo(60, 150, 270, 240, lv.lanes);
+    drawFinger(car.x, car.y - 4);
+
+    // ----- how to play -----
+    noStroke();
+    fill(NAVY);
+    textSize(19);
+    textStyle(BOLD);
+    textAlign(CENTER, CENTER);
+    text("How to play", width / 2, 470);
+    textStyle(NORMAL);
+    fill(GRAY);
+    textSize(16);
+    text("Touch the car and drag left or right.\nSteer away from the cones.", width / 2, 512);
+
+    // the 2 rules as little color keys
+    drawKey(48, 570, GREEN, "Missed a cone = good");
+    drawKey(212, 570, RED, "Hit a cone = bump");
+
+    drawButton("Start", 30, BTN_Y, 330, 56);
+  }
+
+  function drawFinger(x, y) {
+    push();
+    translate(x, y);
+    noStroke();
+    fill(0, 25);
+    circle(0, 0, 26);
+    fill(SKIN);
+    rect(-9, 0, 18, 46, 9);        // finger
+    rect(-20, 30, 40, 50, 14);     // hand
+    fill(255, 120);
+    ellipse(0, 6, 10, 8);          // fingernail shine
+    pop();
+  }
+
+  function drawKey(x, y, col, label) {
+    noStroke();
+    fill(col);
+    rect(x, y - 4, 24, 8, 4);
+    fill(GRAY);
+    textSize(13);
+    textAlign(LEFT, CENTER);
+    text(label, x + 32, y);
+    textAlign(CENTER, CENTER);
+  }
+
+  // =============================================
+  // Clicks
+  // =============================================
+  function mousePressed() {
+    if (isOver(15, 30, 40, 40)) {
+      goTo("carobs.html");
+      return;
+    }
+    if (isOver(30, BTN_Y, 330, 56)) goTo("carobs-play.html");
+  }
+
+  // =============================================
+  // Helpers
+  // =============================================
+  function drawBackArrow() {
+    let hover = isOver(15, 30, 40, 40);
+    if (hover) cursor(HAND);
+    stroke(hover ? BLUE_HOVER : NAVY);
+    strokeWeight(3);
+    noFill();
+    line(36, 40, 26, 50);
+    line(26, 50, 36, 60);
+  }
+
+  function drawButton(label, x, y, w, h) {
+    let hover = isOver(x, y, w, h);
+    let offset = hover && mouseIsPressed ? 2 : 0;
+    if (hover) cursor(HAND);
+
+    noStroke();
+    fill(0, 30);
+    rect(x, y + 4, w, h, 14);
+    fill(hover ? BLUE_HOVER : BLUE);
+    rect(x, y + offset, w, h, 14);
+
+    fill(255);
+    textAlign(CENTER, CENTER);
+    textStyle(BOLD);
+    textSize(21);
+    text(label, x + w / 2, y + h / 2 + offset);
+    textStyle(NORMAL);
+  }
+
+  function isOver(x, y, w, h) {
+    return mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+  }
+
+  // ---------- saved user info (shared by all pages) ----------
+  function loadUser() {
+    try {
+      return JSON.parse(localStorage.getItem("tinyTouchUser")) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  return { setup, draw, mousePressed };
+}
+
+// #############################################################
+// 16. Car Obstacles: Playing   (like trace-play.html)
+// #############################################################
+function carPlayPage() {
+  // =============================================
+  // Tiny Touch - Car Obstacles: Playing (p5.js)
+  //   - Touch the car and hold to drive. Drag left or right to change lane.
+  //   - Lift your finger and the game waits for you (cones stop falling).
+  //   - A cone you miss counts as dodged. A cone you hit is a bump.
+  // When every cone has passed, your score (% dodged) is saved and
+  // the result page opens.
+  // Comes from: carobs-instructions.html, carobs-result.html (Retry / Next Level)
+  // Goes to:    carobs-result.html (finished), entry.html (pause -> Home)
+  // =============================================
+
+  let cnv;
+  let user = {};
+  let level = 0;          // 0 Easy, 1 Medium, 2 Hard
+  let roundNum = 1;       // round 1, 2 or 3
+  let cfg = CAR_LEVELS[0];
+  let total = 8;          // cones in this round
+  let speed = 2.6;        // how fast the cones fall
+
+  let carX = 195;
+  let carY = 650;
+  let targetX = 195;      // the lane center the car is sliding toward
+
+  let obstacles = [];
+  let spawned = 0;        // cones made so far
+  let passed = 0;         // cones that are finished (dodged or bumped)
+  let avoided = 0;
+  let bumps = 0;
+  let closeCalls = 0;
+
+  let ticks = 0;          // counts only while the finger is holding the car
+  let roadOffset = 0;     // scrolls the lane dashes
+  let flash = 0;          // red flash after a bump
+  let holding = false;    // is the finger on the car right now?
+  let paused = false;
+  let finished = false;
+  let finishTimer = 0;
+  let audioCtx = null;
+
+  // ---------- Colors ----------
+  const BLUE = "#2D6CF0";
+  const BLUE_HOVER = "#4A84F5";
+  const NAVY = "#1B2A5A";
+  const GRAY = "#5E6A82";
+  const LIGHT_BLUE = "#D7EAFB";
+  const GOLD = "#FFC83D";
+  const GREEN = "#2EAD5B";
+  const RED = "#E5484D";
+
+  function setup() {
+    cnv = createCanvas(390, 760);
+    cnv.style("touch-action", "none");    // stop the page scrolling while dragging on a phone
+    textFont("Arial");
+
+    user = loadUser();
+    level = constrain(user.carLevel || 0, 0, CAR_LEVELS.length - 1);
+    roundNum = constrain(user.carRound || 1, 1, 3);
+    cfg = CAR_LEVELS[level];
+    total = CAR_ROUND_TOTALS[roundNum - 1];
+    speed = cfg.speed * (1 + 0.1 * (roundNum - 1));    // a little faster each round
+    resetRound();
+  }
+
+  // center x of lane n (1 = leftmost)
+  function laneCenter(n) {
+    let pieceWidth = width / (cfg.lanes * 2);
+    return (2 * n - 1) * pieceWidth;
+  }
+
+  function resetRound() {
+    obstacles = [];
+    spawned = 0;
+    passed = 0;
+    avoided = 0;
+    bumps = 0;
+    closeCalls = 0;
+    ticks = 0;
+    flash = 0;
+    holding = false;
+    paused = false;
+    finished = false;
+    carX = laneCenter(ceil(cfg.lanes / 2));
+    targetX = carX;
+  }
+
+  // =============================================
+  // Draw
+  // =============================================
+  function draw() {
+    cursor(ARROW);
+
+    if (!paused) carX = lerp(carX, targetX, 0.25);     // slide toward the lane
+    if (!paused && !finished && holding) updateGame();
+
+    drawRoad();
+    drawObstacles();
+    if (!holding && !finished) drawCarGlow();
+    drawCarSprite(carX, carY, 1);
+
+    if (flash > 0) {
+      noStroke();
+      fill(229, 72, 77, flash * 4);
+      rect(0, 0, width, height);
+      flash--;
+    }
+
+    drawTopBar();
+    drawHint();
+
+    if (finished) drawFinish();
+    if (paused) drawPauseMenu();
+  }
+
+  // ---------- the game ----------
+  function updateGame() {
+    ticks++;
+    roadOffset = (roadOffset + speed) % 60;
+
+    // a new cone on a schedule, in a random lane
+    if (spawned < total && ticks >= 20 && (ticks - 20) % cfg.gap === 0) {
+      let lane = floor(random(1, cfg.lanes + 1));
+      obstacles.push({
+        x: laneCenter(lane),
+        y: -40,
+        hit: false,
+        done: false,
+        threatened: false
+      });
+      spawned++;
+    }
+
+    for (let o of obstacles) {
+      o.y += speed;
+      let dx = abs(o.x - carX);
+      let dy = abs(o.y - carY);
+
+      // bump
+      if (!o.done && dx < 40 && dy < 55) {
+        o.hit = true;
+        o.done = true;
+        passed++;
+        bumps++;
+        flash = 20;
+        buzz();
+      }
+
+      // the cone was coming right at the car (used for close calls)
+      if (dx < 40 && o.y > carY - 260 && o.y < carY - 70) {
+        o.threatened = true;
+      }
+
+      // it got past the car without touching it
+      if (!o.done && o.y > carY + 55) {
+        o.done = true;
+        passed++;
+        avoided++;
+        if (o.threatened) closeCalls++;
+      }
+    }
+
+    obstacles = obstacles.filter(o => !o.hit && o.y < height + 40);
+
+    if (spawned === total && passed === total) finish();
+  }
+
+  function finish() {
+    holding = false;
+    finished = true;
+    finishTimer = 70;   // a little more than 1 second
+
+    let accuracy = round100(avoided / total);
+    user.lastCar = {
+      accuracy: accuracy,
+      level: level,
+      round: roundNum,
+      avoided: avoided,
+      total: total,
+      bumps: bumps,
+      closeCalls: closeCalls
+    };
+
+    // remember the best score for each level
+    if (!user.carBest) user.carBest = [0, 0, 0];
+    user.carBest[level] = max(user.carBest[level] || 0, accuracy);
+    saveUser(user);
+
+    if (accuracy >= 70) playNotes([523, 659, 784, 1047], 0.12, "triangle");   // happy sound
+    else playNotes([523, 466, 392], 0.18, "sine");                             // "aww" sound
+  }
+
+  function restart() {
+    resetRound();
+  }
+
+  function round100(x) {
+    return Math.round(x * 100);
+  }
+
+  // ---------- drawing ----------
+  function drawRoad() {
+    noStroke();
+    fill(GRAY);
+    rect(0, 0, width, height);
+
+    stroke(LIGHT_BLUE);
+    strokeWeight(4);
+    for (let i = 1; i < cfg.lanes; i++) {
+      let x = i * (width / cfg.lanes);
+      for (let y = -60 + roadOffset; y < height; y += 60) {
+        line(x, y, x, y + 30);
+      }
+    }
+    noStroke();
+  }
+
+  function drawObstacles() {
+    for (let o of obstacles) drawCone(o.x, o.y, 1);
+  }
+
+  // a pulsing ring around the car that says "touch me"
+  function drawCarGlow() {
+    let pulse = 1 + 0.12 * sin(frameCount * 0.12);
+    noStroke();
+    fill(45, 108, 240, 70);
+    circle(carX, carY, 130 * pulse);
+  }
+
+  function drawTopBar() {
+    // soft band behind the top bar so it is easy to read
+    noStroke();
+    fill(255, 150);
+    rect(0, 0, width, 92);
+
+    // pause button
+    let hover = dist(mouseX, mouseY, 40, 50) < 24;
+    if (hover) cursor(HAND);
+    noStroke();
+    fill(0, 30);
+    circle(40, 53, 46);
+    fill(hover ? "#EAF2FF" : 255);
+    circle(40, 50, 46);
+    fill(BLUE);
+    rect(32, 40, 6, 20, 2);
+    rect(42, 40, 6, 20, 2);
+
+    // progress bar
+    fill(255, 220);
+    rect(80, 44, 210, 14, 7);
+    fill(GREEN);
+    rect(80, 44, 210 * passed / total, 14, 7);
+
+    // round counter, like "1/3"
+    fill(BLUE);
+    rect(304, 34, 64, 32, 16);
+    fill(255);
+    textAlign(CENTER, CENTER);
+    textSize(16);
+    textStyle(BOLD);
+    text(roundNum + "/3", 336, 50);
+
+    // level name
+    fill(NAVY);
+    textSize(13);
+    text(cfg.name + " - " + cfg.lanes + " lanes", 185, 76);
+    textStyle(NORMAL);
+  }
+
+  function drawHint() {
+    let msg = "";
+    let bad = false;
+    if (flash > 0 && !finished) { msg = "Bump! Steer away from the cones"; bad = true; }
+    else if (!holding && !finished && ticks === 0) msg = "Touch the car and hold to start";
+    else if (!holding && !finished) msg = "Touch the car to keep going";
+    if (msg === "") return;
+
+    textSize(15);
+    textStyle(BOLD);
+    let w = textWidth(msg) + 36;
+    noStroke();
+    fill(bad ? RED : NAVY);
+    rect(width / 2 - w / 2, 102, w, 34, 17);
+    fill(255);
+    textAlign(CENTER, CENTER);
+    text(msg, width / 2, 119);
+    textStyle(NORMAL);
+  }
+
+  function drawFinish() {
+    finishTimer--;
+    fill(255, 160);
+    noStroke();
+    rect(0, 0, width, height);
+    let s = 1 + 0.08 * sin(frameCount * 0.3);
+    drawStar(width / 2, height / 2 - 20, 70 * s, 32 * s, GOLD);
+    fill(NAVY);
+    textSize(26);
+    textStyle(BOLD);
+    textAlign(CENTER, CENTER);
+    text("Round complete!", width / 2, height / 2 + 80);
+    textStyle(NORMAL);
+    if (finishTimer <= 0) goTo("carobs-result.html");
+  }
+
+  function drawPauseMenu() {
+    noStroke();
+    fill(27, 42, 90, 150);
+    rect(0, 0, width, height);
+    fill(255);
+    rect(45, 230, 300, 300, 24);
+    fill(NAVY);
+    textSize(26);
+    textStyle(BOLD);
+    textAlign(CENTER, CENTER);
+    text("Paused", width / 2, 275);
+    textStyle(NORMAL);
+    drawButton("Resume", 75, 315, 240, 52, true);
+    drawButton("Restart", 75, 382, 240, 52, false);
+    drawButton("Home", 75, 449, 240, 52, false);
+  }
+
+  // =============================================
+  // Driving with the finger / mouse
+  // =============================================
+  function mousePressed() {
+    if (finished) return;
+
+    if (paused) {
+      if (isOver(75, 315, 240, 52)) paused = false;
+      if (isOver(75, 382, 240, 52)) restart();
+      if (isOver(75, 449, 240, 52)) goTo("entry.html");
+      return;
+    }
+
+    // pause button
+    if (dist(mouseX, mouseY, 40, 50) < 24) {
+      paused = true;
+      holding = false;
+      return;
+    }
+
+    // start driving only by touching the car
+    if (dist(mouseX, mouseY, carX, carY) < 60) {
+      holding = true;
+    }
+  }
+
+  function mouseDragged() {
+    if (!holding || paused || finished) return;
+    // the car goes to whichever lane your finger is over
+    let lane = constrain(floor(mouseX / (width / cfg.lanes)) + 1, 1, cfg.lanes);
+    targetX = laneCenter(lane);
+  }
+
+  function mouseReleased() {
+    holding = false;
+  }
+
+  // =============================================
+  // Sounds (made with the browser's Web Audio, no files needed)
+  // =============================================
+  function playNotes(freqs, dur, type) {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      audioCtx.resume();
+      for (let i = 0; i < freqs.length; i++) {
+        let osc = audioCtx.createOscillator();
+        let gain = audioCtx.createGain();
+        let t = audioCtx.currentTime + i * dur;
+        osc.type = type;
+        osc.frequency.value = freqs[i];
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + dur * 1.8);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(t);
+        osc.stop(t + dur * 2);
+      }
+    } catch (e) {}
+  }
+
+  function buzz() {
+    playNotes([150], 0.08, "square");
+  }
+
+  // =============================================
+  // Helpers
+  // =============================================
+  function drawStar(x, y, r1, r2, col) {
+    push();
+    translate(x, y);
+    noStroke();
+    fill(col);
+    beginShape();
+    for (let i = 0; i < 10; i++) {
+      let a = -HALF_PI + i * PI / 5;
+      let r = i % 2 === 0 ? r1 : r2;
+      vertex(cos(a) * r, sin(a) * r);
+    }
+    endShape(CLOSE);
+    pop();
+  }
+
+  function drawButton(label, x, y, w, h, primary) {
+    let hover = isOver(x, y, w, h);
+    if (hover) cursor(HAND);
+    stroke(BLUE);
+    strokeWeight(2);
+    fill(primary ? (hover ? BLUE_HOVER : BLUE) : (hover ? "#EAF2FF" : 255));
+    rect(x, y, w, h, 14);
+    noStroke();
+    fill(primary ? 255 : BLUE);
+    textAlign(CENTER, CENTER);
+    textStyle(BOLD);
+    textSize(19);
+    text(label, x + w / 2, y + h / 2);
+    textStyle(NORMAL);
+  }
+
+  function isOver(x, y, w, h) {
+    return mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+  }
+
+  // ---------- saved user info (shared by all pages) ----------
+  function loadUser() {
+    try {
+      return JSON.parse(localStorage.getItem("tinyTouchUser")) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveUser(u) {
+    try {
+      localStorage.setItem("tinyTouchUser", JSON.stringify(u));
+    } catch (e) {}
+  }
+
+  return { setup, draw, mousePressed, mouseReleased, mouseDragged };
+}
+
+// #############################################################
+// 17-18. Car Obstacles: Great Job / Try Again   (like trace-result.html)
+// #############################################################
+function carResultPage() {
+  // =============================================
+  // Tiny Touch - Car Obstacles: Result (p5.js)
+  // 70% or more dodged  "Great Job!"  -> Next Level / Home
+  // Under 70%           "Try Again!"  -> Retry / Home
+  // Stars: 70-79% = 1 star, 80-89% = 2 stars, 90%+ = 3 stars
+  // Comes from: carobs-play.html
+  // Goes to:    carobs-play.html (Next Level / Retry), entry.html (Home),
+  //             carobs.html (after the very last round)
+  // =============================================
+
+  let user = {};
+  let result = {};
+  let passed = false;
+  let stars = 0;
+  let confetti = [];
+  let allDone = false;    // finished Hard round 3
+
+  // ---------- Layout ----------
+  const BTN1_Y = 584;
+  const BTN2_Y = 652;
+
+  // ---------- Colors ----------
+  const BLUE = "#2D6CF0";
+  const BLUE_HOVER = "#4A84F5";
+  const NAVY = "#1B2A5A";
+  const GRAY = "#5E6A82";
+  const GOLD = "#FFC83D";
+  const GOLD_DARK = "#F2A900";
+  const STAR_OFF = "#C9CFDB";
+  const CONFETTI = ["#2D6CF0", "#FFC83D", "#E36BD6", "#2EAD5B", "#FF6A1A"];
+
+  function setup() {
+    createCanvas(390, 760);
+    textFont("Arial");
+
+    user = loadUser();
+    result = user.lastCar || { accuracy: 0, level: 0, round: 1, avoided: 0, total: 8, bumps: 0, closeCalls: 0 };
+    passed = result.accuracy >= 70;
+
+    if (result.accuracy >= 90) stars = 3;
+    else if (result.accuracy >= 80) stars = 2;
+    else if (passed) stars = 1;
+
+    allDone = passed && result.level === CAR_LEVELS.length - 1 && result.round === 3;
+
+    // confetti pieces (only when they passed)
+    if (passed) {
+      for (let i = 0; i < 60; i++) {
+        confetti.push({
+          x: random(width), y: random(-height, 0),
+          speed: random(1.5, 3.5), spin: random(TWO_PI),
+          col: random(CONFETTI)
+        });
+      }
+    }
+  }
+
+  function draw() {
+    cursor(ARROW);
+    background(passed ? "#EAF4FF" : "#FDEFF7");
+
+    if (passed) drawConfetti();
+    else drawSparkles();
+
+    // star buddy (happy or sad), bouncing a little
+    let bounce = sin(frameCount * 0.08) * 6;
+    drawStarBuddy(width / 2, 190 + bounce, passed);
+
+    // title
+    noStroke();
+    textAlign(CENTER, CENTER);
+    fill(NAVY);
+    textStyle(BOLD);
+    textSize(36);
+    text(passed ? "Great Job!" : "Try Again!", width / 2, 335);
+    textStyle(NORMAL);
+
+    // the 3 stars
+    for (let i = 0; i < 3; i++) {
+      let on = i < stars;
+      let y = i === 1 ? 392 : 400;     // middle star a bit higher
+      drawStar(width / 2 - 70 + i * 70, y, 28, 13, on ? GOLD : STAR_OFF);
+    }
+
+    // score
+    let lv = CAR_LEVELS[result.level];
+    fill(GRAY);
+    textSize(17);
+    text("You dodged", width / 2, 452);
+    fill(passed ? "#2EAD5B" : "#E5484D");
+    textStyle(BOLD);
+    textSize(30);
+    text(result.accuracy + "%", width / 2, 486);
+    textStyle(NORMAL);
+    fill(GRAY);
+    textSize(14);
+    text("of the cones  ·  " + lv.name + ", round " + result.round + " of 3", width / 2, 514);
+    text("Bumps: " + result.bumps + "  ·  Close calls: " + result.closeCalls, width / 2, 536);
+    let best = (user.carBest && user.carBest[result.level]) || 0;
+    text("Best on " + lv.name + ": " + best + "%", width / 2, 558);
+
+    // buttons
+    let label = "Retry";
+    if (passed) label = allDone ? "Play Again" : "Next Level";
+    drawButton(label, 30, BTN1_Y, 330, 56, true);
+    drawButton("Home", 30, BTN2_Y, 330, 56, false);
+
+    if (allDone) {
+      fill(NAVY);
+      textSize(14);
+      textStyle(BOLD);
+      text("You finished every Car Obstacles level! 🎉", width / 2, 732);
+      textStyle(NORMAL);
+    }
+  }
+
+  // =============================================
+  // Clicks
+  // =============================================
+  function mousePressed() {
+    if (isOver(30, BTN1_Y, 330, 56)) {
+      if (!passed) {
+        goTo("carobs-play.html");               // Retry the same round
+        return;
+      }
+      if (allDone) {
+        user.carRound = 1;                      // keep the same level, back to the level list
+        saveUser(user);
+        goTo("carobs.html");
+        return;
+      }
+      // Next Level: next round, or the next difficulty after round 3
+      if (result.round < 3) {
+        user.carLevel = result.level;
+        user.carRound = result.round + 1;
+      } else {
+        user.carLevel = result.level + 1;
+        user.carRound = 1;
+      }
+      saveUser(user);
+      goTo("carobs-play.html");
+      return;
+    }
+
+    if (isOver(30, BTN2_Y, 330, 56)) goTo("entry.html");
+  }
+
+  // =============================================
+  // Drawings
+  // =============================================
+  function drawStarBuddy(x, y, happy) {
+    // glow
+    noStroke();
+    fill(255, 220, 90, 70);
+    circle(x, y, 230);
+
+    drawStar(x, y + 6, 100, 48, GOLD_DARK);   // outline
+    drawStar(x, y, 96, 45, GOLD);
+
+    // eyes
+    fill(NAVY);
+    ellipse(x - 22, y - 8, 14, 18);
+    ellipse(x + 22, y - 8, 14, 18);
+    fill(255);
+    circle(x - 19, y - 12, 5);
+    circle(x + 25, y - 12, 5);
+
+    // cheeks
+    fill(255, 140, 140, 150);
+    ellipse(x - 40, y + 12, 18, 10);
+    ellipse(x + 40, y + 12, 18, 10);
+
+    // mouth
+    if (happy) {
+      fill(NAVY);
+      arc(x, y + 14, 40, 34, 0, PI, CHORD);
+      fill("#FF7A7A");
+      ellipse(x, y + 26, 18, 8);
+    } else {
+      noFill();
+      stroke(NAVY);
+      strokeWeight(4);
+      arc(x, y + 32, 30, 22, PI + 0.3, TWO_PI - 0.3);
+      // a little tear
+      noStroke();
+      fill("#7CC4FF");
+      ellipse(x + 26, y + 10, 8, 12);
+    }
+  }
+
+  function drawConfetti() {
+    noStroke();
+    for (let c of confetti) {
+      c.y += c.speed;
+      c.spin += 0.08;
+      if (c.y > height + 10) {
+        c.y = random(-60, -10);
+        c.x = random(width);
+      }
+      push();
+      translate(c.x, c.y);
+      rotate(c.spin);
+      fill(c.col);
+      rect(-5, -2, 10, 5, 1);
+      pop();
+    }
+  }
+
+  function drawSparkles() {
+    noStroke();
+    // sparkles only along the left and right edges, so they don't cover the words
+    for (let i = 0; i < 14; i++) {
+      let x = i % 2 === 0 ? 22 + (i * 7) % 24 : width - 22 - (i * 11) % 24;
+      let y = 60 + ((i * 151) % 640);
+      let a = 120 + 100 * sin(frameCount * 0.05 + i);
+      drawStar(x, y, 7, 3, color(227, 107, 214, a));
+    }
+  }
+
+  function drawStar(x, y, r1, r2, col) {
+    push();
+    translate(x, y);
+    noStroke();
+    fill(col);
+    beginShape();
+    for (let i = 0; i < 10; i++) {
+      let a = -HALF_PI + i * PI / 5;
+      let r = i % 2 === 0 ? r1 : r2;
+      vertex(cos(a) * r, sin(a) * r);
+    }
+    endShape(CLOSE);
+    pop();
+  }
+
+  function drawButton(label, x, y, w, h, primary) {
+    let hover = isOver(x, y, w, h);
+    let offset = hover && mouseIsPressed ? 2 : 0;
+    if (hover) cursor(HAND);
+
+    noStroke();
+    fill(0, 30);
+    rect(x, y + 4, w, h, 14);
+    stroke(BLUE);
+    strokeWeight(2);
+    fill(primary ? (hover ? BLUE_HOVER : BLUE) : (hover ? "#EAF2FF" : 255));
+    rect(x, y + offset, w, h, 14);
+
+    noStroke();
+    fill(primary ? 255 : BLUE);
+    textAlign(CENTER, CENTER);
+    textStyle(BOLD);
+    textSize(21);
+    text(label, x + w / 2, y + h / 2 + offset);
+    textStyle(NORMAL);
+  }
+
+  function isOver(x, y, w, h) {
+    return mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+  }
+
+  // ---------- saved user info (shared by all pages) ----------
+  function loadUser() {
+    try {
+      return JSON.parse(localStorage.getItem("tinyTouchUser")) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveUser(u) {
+    try {
+      localStorage.setItem("tinyTouchUser", JSON.stringify(u));
+    } catch (e) {}
+  }
+
+  return { setup, draw, mousePressed };
 }
 
 // =============================================
