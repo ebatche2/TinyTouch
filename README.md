@@ -23,6 +23,8 @@ python3 -m http.server 8080
 
 Open <http://localhost:8080/entry.html> for the team home screen or <http://localhost:8080/shapes.html> for Shape Matching. The HTML files load p5.js from a CDN and require internet access.
 
+The team's combined app (Welcome, account screens, Home, Trace the Path, and finished Car Obstacles) opens at <http://localhost:8080/TinyTouch-pages/Melodious%20tuck_2026_11_02_16_17_24/index.html>. Append `#entry.html` to open its Home screen directly. Its Drag Shapes card opens Shape Matching, and the game's Home button returns to the combined app.
+
 ## Shape Matching
 
 Choose **30s timer** or **No timer**, then a difficulty. Watch the demonstration and press **Let's play**. Each session has three rounds with shuffled source and target positions. Pieces get slightly smaller and the fit gets tighter each round.

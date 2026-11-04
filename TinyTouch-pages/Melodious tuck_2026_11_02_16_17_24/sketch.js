@@ -35,9 +35,17 @@ const PAGES = {
 };
 
 function goTo(name) {
+  if (name === "shapes.html") {
+    window.location.assign("../../shapes.html?from=app");
+    return;
+  }
   if (PAGES[name]) nextPage = name;
   else console.log("No page called " + name);
 }
+
+// A link can open a particular app screen, including Home after Shape Matching.
+const linkedPage = window.location.hash.slice(1);
+if (PAGES[linkedPage]) nextPage = linkedPage;
 
 // switch pages at the start of a frame, so the old page finishes its click first
 function switchPage() {
@@ -1932,6 +1940,7 @@ function homePage() {
       // which page each button opens (the rest just show the message for now)
       let pages = {
         trace: "trace.html",       // Trace the Path
+        drag: "shapes.html",      // Shape Matching
         car: "carobs.html",         // Car Obstacles
         avatar: "info.html",       // Profile
         profile: "info.html",
