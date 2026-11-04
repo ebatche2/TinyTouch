@@ -36,7 +36,7 @@ const PAGES = {
 
 function goTo(name) {
   if (name === "shapes.html") {
-    window.location.assign("../../shapes.html?from=app");
+    window.location.assign("shapes.html?from=app");
     return;
   }
   if (PAGES[name]) nextPage = name;

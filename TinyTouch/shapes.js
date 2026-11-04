@@ -13,9 +13,7 @@ let pieceRadius = 43, fitTolerance = 24, practice = false;
 let leaveFrom = "levels", leaveTo = "exit";
 let personalBest = 0, newBest = false, storageAvailable = true;
 // Return to the Home screen that opened the game. Set to "" in a standalone editor.
-const HOME_URL = new URLSearchParams(window.location.search).get("from") === "app"
-  ? "TinyTouch-pages/Melodious tuck_2026_11_02_16_17_24/index.html#entry.html"
-  : "entry.html";
+const HOME_URL = "index.html#entry.html";
 const levels = ["Easy", "Medium", "Hard", "Expert"];
 const colors = ["#fa6267", "#258fff", "#ffcd52", "#62c875", "#af82e5", "#f3944f"];
 const shapeCounts = [3, 4, 5, 6];
