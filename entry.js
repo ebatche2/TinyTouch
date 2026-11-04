@@ -3,6 +3,7 @@
 // =============================================
 
 // ---------- User info (change these later) ----------
+let homeScale = 1; // Keep the existing 390px design usable on smaller phones.
 let userName = "Jay";
 let streak = 10;
 let exercises = 28;
@@ -31,7 +32,10 @@ const BEAR = "#A0612E";
 const BEAR_LIGHT = "#E8C29E";
 
 function setup() {
-  createCanvas(390, 760);
+  homeScale = min(1, windowWidth / 390);
+  const canvas = createCanvas(390 * homeScale, 760 * homeScale);
+  canvas.style("display", "block");
+  canvas.style("margin", "auto");
   textFont("Arial");
 
   items = [
@@ -69,6 +73,8 @@ function setup() {
 
 function draw() {
   background(BG);
+  push();
+  scale(homeScale);
   cursor(ARROW);
 
   // ----- logo -----
@@ -101,6 +107,7 @@ function draw() {
   }
 
   drawToast();
+  pop();
 }
 
 // =============================================
@@ -217,7 +224,8 @@ function mousePressed() {
 function mouseReleased() {
   if (pressedItem && isOver(pressedItem)) {
     pressedItem.s = 1.12;          // little "pop" bounce
-    showToast(pressedItem.msg);    // message at the bottom
+    if (pressedItem.id === "drag") window.location.assign("shapes.html");
+    else showToast(pressedItem.msg); // other exercises keep their existing feedback
   }
   pressedItem = null;
 }
@@ -240,16 +248,16 @@ function drawToast() {
 
   noStroke();
   fill(27, 42, 90, a);
-  rect(width / 2 - w / 2, 705 + slide, w, 40, 20);
+  rect(195 - w / 2, 705 + slide, w, 40, 20);
   fill(255, a);
   textAlign(CENTER, CENTER);
-  text(toastMsg, width / 2, 725 + slide);
+  text(toastMsg, 195, 725 + slide);
   textStyle(NORMAL);
 }
 
 function isOver(it) {
-  return mouseX > it.x && mouseX < it.x + it.w &&
-         mouseY > it.y && mouseY < it.y + it.h;
+  return mouseX / homeScale > it.x && mouseX / homeScale < it.x + it.w &&
+         mouseY / homeScale > it.y && mouseY / homeScale < it.y + it.h;
 }
 
 // =============================================
@@ -427,4 +435,8 @@ function drawHand(x, y, s, col, angle) {
   rect(-4, -16, 8, 20, 4);
   pop();
   pop();
+}
+function windowResized() {
+  homeScale = min(1, windowWidth / 390);
+  resizeCanvas(390 * homeScale, 760 * homeScale);
 }
