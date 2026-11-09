@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clean the Teeth (p5.js)</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#eef6fa}
+#app{width:390px;margin:0 auto}
+canvas{display:block;touch-action:none}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<script src="https://unpkg.com/ml5@1.2.2/dist/ml5.min.js"></script>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const W = 390, H = 760, CY = 430; // CY = bite line where top and bottom teeth meet
+const INK = '#17324d', GOLD = '#ffc627', MAROON = '#8c1d40', OK = '#1f9d6b', SKY = '#eef6fa';
+const LV = [
+  {name:'Easy', n:3, w:108, h:170, k:350, items:1, desc:'Big teeth, one item each'},
+  {name:'Medium', n:4, w:80, h:150, k:500, items:1, desc:'More teeth, more scrubbing'},
+  {name:'Hard', n:6, w:52, h:130, k:700, items:2, desc:'Small teeth, two items each'}];
+let scr = 'home', mode = 'camera', level = 0, teeth = [], btns = [];
+let cam = null, handPose, hands = [];
+let last = null, sx = 0, sy = 0, onT = 0, tot = 0, t0 = 0, seen = 0, doneAt = 0, res = null;
+
+function preload() { handPose = ml5.handPose(); }
+function setup() {
+  createCanvas(W, H).parent('app');
+  textFont('Nunito, system-ui, sans-serif');
+  noStroke();
+}
+function gotHands(r) { hands = r; }
+function startCam() {
+  if (mode !== 'camera' || cam) return;
+  cam = createCapture(VIDEO);
+  cam.size(640, 480);
+  cam.hide();
+  handPose.detectStart(cam, gotHands);
+}
+
+// ---------- helpers ----------
+function txt(s, x, y, size, col, al = LEFT, wt = 800) {
+  push(); noStroke(); fill(col); textSize(size); textAlign(al, CENTER); textStyle(wt > 700 ? BOLD : NORMAL); text(s, x, y); pop();
+}
+function btn(label, x, y, w, h, style, fn) {
+  const over = mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+  const bg = style === 'gold' ? GOLD : style === 'white' ? '#ffffff' : 'rgba(255,255,255,0.15)';
+  const edge = style === 'gold' ? '#c99a10' : style === 'white' ? '#b9c7d1' : 'rgba(255,255,255,0.4)';
+  push(); noStroke();
+  if (style !== 'ghost') { fill(edge); rect(x, y + 5, w, h, 18); }
+  fill(over ? lerpColor(color(bg), color('#ffffff'), 0.35) : bg);
+  if (style === 'ghost') { stroke(edge); strokeWeight(2); }
+  rect(x, y, w, h, 18); pop();
+  txt(label, x + w / 2, y + h / 2, style === 'ghost' ? 17 : 22, style === 'ghost' ? '#fff' : INK, CENTER);
+  btns.push({x, y, w, h, fn});
+}
+function star(cx, cy, r, col) {
+  push(); noStroke(); fill(col); beginShape();
+  for (let i = 0; i < 10; i++) { const a = -HALF_PI + i * PI / 5, rr = i % 2 ? r * 0.45 : r; vertex(cx + cos(a) * rr, cy + sin(a) * rr); }
+  endShape(CLOSE); pop();
+}
+function header() {
+  fill(INK); rect(0, 0, W, 64);
+  txt('Clean the Teeth', 16, 32, 22, '#fff');
+  btn('Home', 190, 10, 84, 44, 'ghost', () => scr = 'home');
+  btn('Progress', 282, 10, 96, 44, 'ghost', () => scr = 'progress');
+}
+function card(x, y, w, h) { push(); noStroke(); fill('#ffffff'); rect(x, y, w, h, 24); pop(); }
+function savedBest() { try { return JSON.parse(localStorage.getItem('fms') || '{}'); } catch (e) { return {}; } }
+
+// ---------- teeth ----------
+function randItems(c) {
+  const t1 = floor(random(7)), a = [t1];
+  if (c.items > 1) a.push((t1 + 1 + floor(random(6))) % 7);
+  return a;
+}
+function startLevel(l) {
+  level = l; const c = LV[l], gap = 6, x0 = (W - (c.n * c.w + (c.n - 1) * gap)) / 2;
+  teeth = [];
+  for (let i = 0; i < c.n; i++) {
+    [true, false].forEach(up => teeth.push({
+      x: x0 + i * (c.w + gap), y: up ? CY - c.h : CY, w: c.w, h: c.h, up, clean: 0, s: floor(random(1000)),
+      g: randItems(c).map(type => ({type, dx: random(-c.w * 0.12, c.w * 0.12), rot: random(-0.6, 0.6)}))
+    }));
+  }
+  last = null; onT = 0; tot = 0; t0 = 0; doneAt = 0; res = null; seen = millis(); scr = 'play';
+}
+function drawTooth(t) {
+  const r = min(t.w * 0.4, t.h * 0.45), clean = t.clean >= 1;
+  push();
+  stroke(clean ? OK : '#cbbf9f'); strokeWeight(clean ? 5 : 3); fill('#fffef6');
+  if (t.up) rect(t.x - 3, t.y, t.w + 6, t.h, 8, 8, r, r); else rect(t.x - 3, t.y, t.w + 6, t.h, r, r, 8, 8);
+  noStroke(); fill(184, 145, 60, 200 * (1 - t.clean));
+  const y0 = t.up ? t.y + 44 : t.y + 16;
+  for (let k = 0; k < 6; k++) {
+    const a = ((t.s * 13 + k * 47) % 100) / 100, b = ((t.s * 29 + k * 31) % 100) / 100;
+    circle(t.x + 12 + a * (t.w - 24), y0 + b * (t.h - 62), t.w * 0.07 + (k % 3) * 2);
+  }
+  stroke(255, 255, 255, 230); strokeWeight(4); strokeCap(ROUND);
+  line(t.x + t.w * 0.2, t.y + t.h * (t.up ? 0.4 : 0.4), t.x + t.w * 0.2, t.y + t.h * (t.up ? 0.6 : 0.65));
+  pop();
+  gunk(t);
+  if (clean) star(t.x + t.w / 2, t.y + t.h / 2, 18, GOLD);
+}
+function gunk(t) {
+  const al = 255 * (1 - t.clean); if (al < 8) return;
+  const n = t.g.length, sc = n > 1 ? 0.75 : constrain(t.w / 95, 0.8, 1.4);
+  const ys = n > 1 ? (t.up ? [0.5, 0.78] : [0.22, 0.5]) : (t.up ? [0.62] : [0.4]);
+  t.g.forEach((it, i) => {
+    push(); translate(t.x + t.w / 2 + it.dx, t.y + t.h * ys[i]); rotate(it.rot); scale(sc); noStroke();
+    drawItem(it.type, al); pop();
+  });
+}
+function drawItem(type, a) {
+  if (type === 0) { // spinach
+    fill(46, 125, 50, a); ellipse(0, 0, 46, 20); ellipse(-12, 8, 20, 12); triangle(20, 0, 30, -4, 30, 4);
+    stroke(27, 94, 32, a); strokeWeight(2); line(-18, 0, 24, 0);
+  } else if (type === 1) { // ladybug
+    stroke(30, a); strokeWeight(2); [-8, 0, 8].forEach(y => { line(-12, y, -20, y + 3); line(12, y, 20, y + 3); });
+    noStroke(); fill(205, 35, 35, a); ellipse(0, 2, 30, 26); fill(30, a); circle(0, -13, 13); rect(-1, -10, 2, 24);
+    circle(-7, -2, 5); circle(7, -2, 5); circle(-6, 8, 5); circle(6, 8, 5);
+  } else if (type === 2) { // corn kernel
+    fill(250, 210, 60, a); ellipse(0, 0, 26, 32); fill(255, 240, 150, a); ellipse(-4, -6, 9, 12);
+  } else if (type === 3) { // pink gum
+    fill(240, 110, 170, a); ellipse(0, 0, 40, 24); ellipse(11, -6, 20, 16); fill(255, 170, 205, a); ellipse(-8, -3, 10, 6);
+  } else if (type === 4) { // pizza bit
+    fill(240, 170, 50, a); triangle(-20, -14, 20, -14, 0, 20); fill(200, 50, 40, a); circle(-5, -5, 12); circle(8, -8, 9);
+  } else if (type === 5) { // worm
+    noFill(); stroke(230, 150, 140, a); strokeWeight(8); strokeCap(ROUND); bezier(-18, 4, -8, -14, 6, 16, 18, -4);
+    noStroke(); fill(60, a); circle(18, -4, 4);
+  } else { // pea
+    fill(120, 190, 70, a); circle(0, 0, 26); fill(175, 225, 115, a); circle(-5, -5, 8);
+  }
+}
+function drawMouth() {
+  const h = LV[level].h, top = CY - h - 40, bot = CY + h + 40;
+  fill('#6e1a2a'); rect(10, top, 370, bot - top, 80);
+  teeth.forEach(drawTooth);
+  fill('#f0868f');
+  rect(20, top + 10, 350, 50, 50, 50, 0, 0); rect(20, bot - 60, 350, 50, 0, 0, 50, 50);
+  teeth.forEach(t => ellipse(t.x + t.w / 2, t.up ? top + 60 : bot - 60, t.w + 4, 40));
+  push(); noFill(); stroke('#d9625a'); strokeWeight(20); rect(10, top, 370, bot - top, 80); pop();
+}
+function drawBrush(x, y, sc = 1, flip = false) {
+  push(); translate(x, y); scale(sc, flip ? -sc : sc); noStroke();
+  fill(130, 185, 55); rect(40, -4, 170, 24, 12);
+  rect(-52, -8, 104, 32, 14);
+  stroke(95, 145, 32); strokeWeight(3); strokeCap(ROUND); line(-36, 2, 196, 2);
+  stroke(205, 232, 135); strokeWeight(6);
+  line(84, -2, 78, 18); line(100, -2, 94, 18); line(116, -2, 110, 18);
+  noStroke();
+  for (let i = 0; i < 10; i++) {
+    const bx = -44 + i * 9;
+    stroke(190, 205, 220); strokeWeight(1); fill(255); rect(bx, -32, 7, 26, 3); noStroke();
+    fill(185, 222, 245); rect(bx, -32, 7, 8, 3);
+  }
+  pop();
+}
+
+// ---------- input ----------
+function getPos() {
+  if (mode === 'mouse') return (mouseX > 0 && mouseX < W && mouseY > 0 && mouseY < H) ? {x: mouseX, y: mouseY} : null;
+  if (hands.length) {
+    const h = hands[0], k = h.index_finger_tip || h.keypoints[8];
+    return {x: (1 - k.x / 640) * W, y: (k.y / 480) * H};
+  }
+  return null;
+}
+function mousePressed() {
+  for (let i = btns.length - 1; i >= 0; i--) {
+    const b = btns[i];
+    if (mouseX > b.x && mouseX < b.x + b.w && mouseY > b.y && mouseY < b.y + b.h) { b.fn(); break; }
+  }
+}
+
+// ---------- screens ----------
+function drawDemo(cx, cy) {
+  const bx = cx + 80 * sin(frameCount * 0.05), low = floor(frameCount / 240) % 2 === 1;
+  card(cx - 170, cy - 130, 340, 260);
+  fill('#6e1a2a'); rect(cx - 150, cy - 110, 300, 220, 28);
+  const tw = 40, x0 = cx - 108;
+  for (let r = 0; r < 2; r++) {
+    const up = r === 0, ty = up ? cy - 84 : cy, active = (r === 1) === low;
+    for (let i = 0; i < 5; i++) {
+      const tx = x0 + i * (tw + 4);
+      push(); stroke('#cbbf9f'); strokeWeight(2); fill('#fffef6');
+      if (up) rect(tx, ty, tw, 84, 4, 4, 16, 16); else rect(tx, ty, tw, 84, 16, 16, 4, 4);
+      pop();
+      const a = active ? 220 * constrain(abs(bx - (tx + tw / 2)) / 45, 0, 1) : 220;
+      noStroke(); fill(184, 145, 60, a);
+      circle(tx + 12, ty + (up ? 30 : 20), 9); circle(tx + 27, ty + (up ? 46 : 36), 11); circle(tx + 20, ty + (up ? 38 : 28), 7);
+    }
+  }
+  noStroke(); fill('#f0868f');
+  rect(cx - 146, cy - 106, 292, 34, 24, 24, 0, 0); rect(cx - 146, cy + 72, 292, 34, 0, 0, 24, 24);
+  push(); noFill(); stroke('#d9625a'); strokeWeight(8); rect(cx - 150, cy - 110, 300, 220, 28); pop();
+  drawBrush(bx, low ? cy + 20 : cy - 20, 0.45, low);
+}
+function home() {
+  header();
+  txt('Short games for', 24, 130, 34, INK); txt('stronger fingers.', 24, 172, 34, INK);
+  txt('Brush the plaque away with your finger.', 24, 220, 16, INK, LEFT, 600);
+  txt('Three difficulty levels.', 24, 246, 16, INK, LEFT, 600);
+  btn('Play', 24, 286, 342, 72, 'gold', () => scr = 'select');
+  btn('Input: ' + (mode === 'camera' ? 'Camera' : 'Mouse or touch'), 24, 378, 342, 64, 'white', () => { mode = mode === 'camera' ? 'mouse' : 'camera'; });
+  drawDemo(195, 600);
+}
+function how() {
+  header();
+  txt('How to play', 24, 100, 32, INK);
+  const steps = ['Hold one hand up\nto the camera.', 'Move your index finger back\nand forth over the teeth.', 'Clean every tooth, top and\nbottom, to finish the level.'];
+  steps.forEach((s, i) => {
+    const y = 126 + i * 88; card(24, y, 342, 80);
+    fill(GOLD); rect(24, y, 10, 80, 24, 0, 0, 24); txt(s, 52, y + 40, 17, INK, LEFT, 600);
+  });
+  drawDemo(195, 520);
+  btn("I'm ready", 24, 674, 200, 64, 'gold', () => { startCam(); startLevel(level); });
+  btn('Back', 236, 674, 130, 64, 'white', () => scr = 'select');
+}
+function selectScr() {
+  header();
+  txt('Choose difficulty', 24, 100, 32, INK);
+  const b = savedBest();
+  LV.forEach((c, i) => {
+    const y = 126 + i * 188, r = b[i];
+    card(24, y, 342, 176);
+    txt(c.name, 44, y + 34, 28, INK);
+    for (let k = 1; k <= 3; k++) star(276 + (k - 1) * 36, y + 34, 14, r && k <= r.st ? GOLD : '#cfd8dd');
+    txt(c.desc, 44, y + 78, 16, INK, LEFT, 600);
+    txt(c.n * 2 + ' teeth to clean', 44, y + 100, 16, INK, LEFT, 600);
+    btn('Start', 44, y + 114, 302, 50, 'gold', () => { level = i; scr = 'how'; });
+  });
+}
+function progressScr() {
+  header();
+  txt('Your progress', 24, 100, 32, INK);
+  const b = savedBest();
+  LV.forEach((c, i) => {
+    const y = 126 + i * 146, r = b[i];
+    card(24, y, 342, 130);
+    txt(c.name, 44, y + 36, 26, INK);
+    for (let k = 1; k <= 3; k++) star(276 + (k - 1) * 36, y + 36, 14, r && k <= r.st ? GOLD : '#cfd8dd');
+    txt(r ? 'Best accuracy ' + r.acc + '%' : 'Not played yet', 44, y + 90, 18, INK, LEFT, 600);
+  });
+  btn('Home', 24, 590, 160, 64, 'gold', () => scr = 'home');
+}
+function play() {
+  const now = millis(), p = (!res) ? getPos() : null;
+  if (!res) {
+    if (p) {
+      seen = now; if (!t0) t0 = now;
+      if (!last) { sx = p.x; sy = p.y; } else { sx += (p.x - sx) * 0.3; sy += (p.y - sy) * 0.3; }
+      if (last) {
+        const d = dist(sx, sy, last.x, last.y); tot += d;
+        const t = teeth.find(t => sx > t.x && sx < t.x + t.w && sy > t.y && sy < t.y + t.h);
+        if (t) { t.clean = min(1, t.clean + d / LV[level].k); onT += d; }
+      }
+      last = {x: sx, y: sy};
+    } else last = null;
+  }
+  const pr = teeth.reduce((a, t) => a + t.clean, 0) / teeth.length;
+  if (!res && pr >= 1 && !doneAt) doneAt = now;
+  if (!res && doneAt && now - doneAt > 700) finish();
+
+  drawMouth();
+  if (last && !res) drawBrush(last.x, last.y + 19);
+  if (mode === 'camera' && !res && now - seen > 500) {
+    fill(MAROON); rect(W / 2 - 150, 118, 300, 40, 20); txt('Show your hand to the camera', W / 2, 138, 17, '#fff', CENTER);
+  }
+  // HUD
+  fill(INK); rect(0, 0, W, 100);
+  btn('Home', 12, 12, 90, 48, 'ghost', () => scr = 'home');
+  txt(LV[level].name, 114, 36, 22, '#fff');
+  txt(round(pr * 100) + '%', 214, 36, 20, '#fff');
+  fill('#ffffff'); rect(12, 72, 258, 20, 10); fill(OK); rect(12, 72, 258 * pr, 20, 10);
+  if (mode === 'camera' && cam) { push(); translate(282 + 96, 8); scale(-1, 1); image(cam, 0, 0, 96, 72); pop(); }
+
+  if (res) {
+    btns = [];
+    fill(23, 50, 77, 210); rect(0, 0, W, H);
+    card(25, 140, 340, 540);
+    txt(['Keep going!', 'Nice work!', 'Great Job!'][res.st - 1], W / 2, 192, 32, INK, CENTER);
+    for (let k = 1; k <= 3; k++) star(W / 2 + (k - 2) * 70, 258, 26, k <= res.st ? GOLD : '#cfd8dd');
+    txt('Accuracy ' + res.acc + '%', W / 2, 316, 24, INK, CENTER);
+    txt('Time ' + res.sec + 's', W / 2, 350, 20, INK, CENTER, 600);
+    txt(res.st === 3 ? 'Smooth, steady strokes.' : 'Try shorter strokes that\nstay on the teeth.', W / 2, 396, 17, INK, CENTER, 600);
+    let y = 450;
+    if (level < 2) { btn('Next level', 45, y, 300, 56, 'gold', () => startLevel(level + 1)); y += 66; }
+    btn('Try again', 45, y, 300, 56, 'white', () => startLevel(level)); y += 66;
+    btn('Home', 45, y, 300, 56, 'white', () => scr = 'home');
+  }
+}
+function finish() {
+  const acc = round(100 * onT / max(tot, 1)), sec = round((millis() - t0) / 1000), st = acc >= 80 ? 3 : acc >= 60 ? 2 : 1;
+  res = {acc, sec, st};
+  try { const b = savedBest(); if (!b[level] || acc > b[level].acc) b[level] = {acc, st}; localStorage.setItem('fms', JSON.stringify(b)); } catch (e) {}
+}
+function draw() {
+  btns = [];
+  background(SKY);
+  if (scr === 'home') home(); else if (scr === 'how') how(); else if (scr === 'select') selectScr(); else if (scr === 'progress') progressScr(); else play();
+}
+</script>
+</body>
+</html>
