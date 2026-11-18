@@ -12,6 +12,7 @@ A p5.js project for fine motor practice.
 | `goals.html` / `goals.js` | Existing goals page. |
 | `carobs.html` / `carobs.js` | Existing Car Obstacles exercise. |
 | `shapes.html` / `shapes.js` | Shape Matching exercise. |
+| `teeth.html` | Brush the Teeth (Clean the Teeth) exercise; all code is inside the one file. |
 
 ## Preview
 

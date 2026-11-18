@@ -1,16 +1,26 @@
 // Tiny Touch: Drag Shapes. Paste this whole file into sketch.js.
+// Colors shared with the rest of the Tiny Touch app
+const NAVY = "#1B2A5A", BLUE = "#2D6CF0", BLUE_HOVER = "#4A84F5", MUTED = "#5E6A82", BORDER = "#E3E8F1";
+const GREEN = "#2EAD5B", RED = "#E5484D", GOLD = "#FFC83D", BG = "#F5F8FE", LIGHT_BLUE = "#EAF2FF";
+const GOLD_DARK = "#F2A900", STAR_OFF = "#C9CFDB", CONFETTI = ["#2D6CF0", "#FFC83D", "#E36BD6", "#2EAD5B", "#FF6A1A"];
+// One color per level, like the level pills in Car Obstacles and Trace the Path
+const levelColors = [
+  { color: "#7DD87A", dark: "#2EAD5B" }, { color: "#FFE07A", dark: "#D9A400" },
+  { color: "#FFB27A", dark: "#E07020" }, { color: "#FF8A8A", dark: "#E5484D" }
+];
 let screen = "levels", level = 0;
 let shapes = [], held = -1;
 let timeLeft = 30, attempts = 0, matched = 0;
 let dragX = 0, dragY = 0, message = "", timeUp = false;
 let pickupX = 0, pickupY = 0;
-let messageDetail = "", messageColor = "#526283", feedbackTime = 0;
+let messageDetail = "", messageColor = MUTED, feedbackTime = 0;
 let playTime = 0, completedAt = 0, resultAge = 0;
-let zoom = 1, center = 0, panelWidth = 0, offsetY = 0;
+let zoom = 1, center = 195, panelWidth = 390, offsetX = 0, offsetY = 0; // the game is drawn on a 390 x 760 page, centered in the window
+let btns = [];
 let roundNumber = 1, roundResults = [], sessionActive = false;
 let sourceRows = [], targetRows = [];
 let pieceRadius = 43, fitTolerance = 24, practice = false;
-let leaveFrom = "levels", leaveTo = "exit";
+let leaveFrom = "levels", leaveTo = "levels";
 let personalBest = 0, newBest = false, storageAvailable = true;
 // Return to the Home screen that opened the game. Set to "" in a standalone editor.
 const HOME_URL = "index.html#entry.html";
@@ -24,29 +34,26 @@ const tolerance = [24, 18, 13, 9];
 function setup() {
   const canvas = createCanvas(windowWidth, windowHeight);
   canvas.style("display", "block");
-  textFont("Trebuchet MS");
+  textFont("Arial");
   textAlign(CENTER, CENTER);
-  describe("Drag Shapes. Play three rounds with fresh layouts. Choose a timer or untimed practice. Drag shapes into matching outlines. Back, Home, Pause, and Exit are available; leaving an active session asks for confirmation.");
+  describe("Drag Shapes. Play three rounds with fresh layouts. Choose a timer or untimed practice. Drag shapes into matching outlines. The pause button opens Resume, Restart, Change level, and Home; leaving an active session asks for confirmation.");
 }
 
 function draw() {
-  // Scale down on short phones, so every control stays on screen.
-  zoom = min(1, height / 760);
-  center = width / zoom / 2;
-  panelWidth = min(width / zoom - 32, 720);
-  offsetY = (height / zoom - 760) / 2;
-  background("#f0f6fd");
+  // The page is 390 wide, in the top-left corner of a white window (like Trace the Path and Car Obstacles).
+  // Only on small windows is it scaled down, so every control stays on screen.
+  zoom = min(1, height / 720, width / 390);
+  offsetX = 0;
+  offsetY = 0;
+  const info = screen === "results" ? resultInfo() : null;
+  background("#ffffff");
   cursor(held >= 0 ? "grabbing" : "default");
+  btns = [];
   push();
   scale(zoom);
-  translate(0, offsetY);
   noStroke();
-  fill(27, 42, 90, 8);
-  rect(center - panelWidth / 2, 20, panelWidth, 728, 28);
-  fill("#ffffff");
-  rect(center - panelWidth / 2, 16, panelWidth, 728, 28);
-  words("TINY TOUCH", center, 43, 12, "#2d6cf0", true);
-  words("Drag Shapes", center, 103, 31, "#1b2a5a", true);
+  fill(info ? (info.score >= 70 ? "#EAF4FF" : "#FDEFF7") : BG);
+  rect(0, 0, 390, 760);
 
   if (screen === "levels") drawLevels();
   if (screen === "instructions") drawInstructions();
@@ -60,48 +67,88 @@ function draw() {
     animatePieces();
     if (screen === "finishing" && playTime - completedAt > 0.85) finish(false);
   }
-  if (screen === "playing" || screen === "paused" || screen === "finishing") drawGame();
+  if (screen === "playing" || screen === "paused" || screen === "finishing") { drawGame(); drawTopBar(); }
   if (screen === "paused") drawPause();
   if (screen === "results") drawResults();
-  if (screen === "exit") drawExit();
-  if (screen !== "leave") drawNavigation();
   if (screen === "leave") drawLeave();
   pop();
 }
 
 function drawLevels() {
-  words("Find the fit. Make a match.", center, 151, 19, "#5e6a82");
-  const float = sin(millis() / 650) * 3;
-  shapeIcon(0, center - 65, 218 + float, 28, colors[0], true);
-  shapeIcon(1, center, 208 - float, 27, colors[1], true);
-  shapeIcon(2, center + 65, 220 + float, 29, colors[2], true);
-  words("3 short rounds · A fresh board each time", center, 274, min(16, panelWidth / 23), "#5e6a82");
+  drawBackArrow(goBack);
+  words("Drag Shapes", center, 50, 24, NAVY, true);
 
-  const w = min(panelWidth - 40, 360), x = center - w / 2;
-  smallButton("30s timer", x, 300, (w - 8) / 2, !practice);
-  smallButton("No timer", center + 4, 300, (w - 8) / 2, practice);
-  const shades = ["#e6f5d9", "#fff3c5", "#ffe5cf", "#ffe0e3"];
-  const details = ["3 large shapes · steady practice", "4 shapes · tighter alignment", "5 shapes · adds a diamond", "6 small shapes · adds a hexagon"];
-  for (let i = 0; i < 4; i++) button(levels[i], 367 + i * 72, shades[i], details[i]);
-  words(practice ? "Take your time. Accuracy comes first." : "30 seconds for each round. Pause anytime.", center, 662, min(14, panelWidth / 25), "#5e6a82");
+  // preview card: a shape slides into its outline
+  card(30, 90, 330, 180);
+  drawShapeDemo(30, 90, 330, 180, 30);
+
+  words("Match the Shapes", center, 305, 22, NAVY, true);
+  words("Drag each shape into its outline.", center, 333, 15, MUTED);
+  words("Choose a level:", 34, 366, 14, NAVY, true, LEFT);
+  for (let i = 0; i < 4; i++) levelPill(i, 30, 392 + i * 58);
+  button("Start", 30, 640, 330, 56, "primary", () => { screen = "instructions"; });
+}
+
+// A level choice, drawn like the level pills in Car Obstacles
+function levelPill(i, x, y) {
+  const w = 330, h = 48, on = level === i, over = hitBox(x, y, w, h);
+  if (over) cursor("pointer");
+  noStroke();
+  fill(0, 20);
+  rect(x, y + 3, w, h, 24);
+  fill(levelColors[i].color);
+  rect(x, y, w, h, 24);
+  if (on) { stroke(NAVY); strokeWeight(3); noFill(); rect(x, y, w, h, 24); }
+  for (let k = 0; k <= i; k++) drawStar(x + 26 + k * 20, y + h / 2, 9, 4, on ? "#FFFFFF" : levelColors[i].dark);
+  words(levels[i] + " - " + shapeCounts[i] + " shapes", x + w / 2 + 24, y + h / 2, 18, NAVY, on);   // +24 keeps it clear of the stars
+  if (on) {
+    stroke(NAVY); strokeWeight(3);
+    line(x + w - 38, y + h / 2, x + w - 32, y + h / 2 + 6);
+    line(x + w - 32, y + h / 2 + 6, x + w - 22, y + h / 2 - 6);
+    noStroke();
+  }
+  btns.push({ x, y, w, h, fn: () => { level = i; } });
+}
+
+// A looping demo: a shape slides into its outline, which turns green
+function drawShapeDemo(x, y, w, h, r) {
+  const cycle = floor(millis() / 3200), t = (millis() % 3200) / 3200, type = cycle % 6;
+  const ax = x + 80, bx = x + w - 80, cy = y + h / 2 + 6;
+  const k = constrain((t - 0.15) / 0.45, 0, 1), ease = k * k * (3 - 2 * k), arrived = k === 1;
+  words("PICK UP", ax, y + 26, 11, "#718299", true);
+  words("MATCH HERE", bx, y + 26, 11, "#718299", true);
+  shapeIcon(type, bx, cy, r, arrived ? GREEN : "#8998b0", false);
+  shapeIcon(type, lerp(ax, bx, ease), cy, r, colors[type], true);
+  if (arrived) shapeIcon(type, bx, cy, r + 4, GREEN, false);
 }
 
 function drawInstructions() {
-  words(levels[level] + " · 3 rounds · " + (practice ? "No timer" : "30s each"), center, 150, 17, "#2d6cf0", true);
-  words("Pick up. Line up. Let go.", center, 195, min(23, panelWidth / 15), "#1b2a5a", true);
-  const step = min(1, (millis() % 3400) / 2100);
-  const progress = step * step * (3 - 2 * step);
+  drawBackArrow(goBack);
+  words("Drag Shapes", center, 50, 24, NAVY, true);
+
+  // which level the player picked
+  const label = levels[level] + "  ·  3 rounds";
+  textSize(14);
+  textStyle(BOLD);
+  const pillW = textWidth(label) + 32;
   noStroke();
-  fill("#f0f6fd");
-  rect(center - panelWidth / 2 + 20, 237, panelWidth - 40, 145, 22);
-  shapeIcon(0, center + 77, 302, 36, progress === 1 ? "#37aa67" : "#8496ad", false);
-  shapeIcon(0, lerp(center - 77, center + 77, progress), 302, 36, colors[0], true);
-  if (progress === 1) shapeIcon(0, center + 77, 302, 40, "#37aa67", false);
-  words("1   Hold a colored shape", center, 424, 18, "#1b2a5a");
-  words("2   Center it inside the same outline", center, 465, min(18, panelWidth / 20), "#1b2a5a");
-  words("3   Let go when the outline turns green", center, 506, min(18, panelWidth / 21), "#1b2a5a");
-  words("On phones, shapes lift above your finger.", center, 550, min(15, panelWidth / 25), "#5e6a82");
-  button("Let's play  →", 589);
+  fill(BLUE);
+  rect(center - pillW / 2, 78, pillW, 30, 15);
+  words(label, center, 93, 14, "#ffffff", true);
+
+  // demo card
+  card(30, 130, 330, 300);
+  drawShapeDemo(30, 130, 330, 300, 38);
+
+  words("How to play", center, 470, 19, NAVY, true);
+  words("Pick up a shape and drag it.\nLet go when it fits the outline.", center, 512, 16, MUTED);
+  words("On phones, shapes lift above your finger.", center, 543, 13, MUTED);
+
+  // timer choice
+  toggle("30s timer", 30, 560, 160, 44, !practice, () => { practice = false; });
+  toggle("No timer", 200, 560, 160, 44, practice, () => { practice = true; });
+
+  button("Start", 30, 640, 330, 56, "primary", startSession);
 }
 
 function startSession() {
@@ -137,7 +184,7 @@ function startRound(freshLayout = true) {
   timeUp = false;
   playTime = 0;
   resultAge = 0;
-  giveFeedback("Ready? Pick up a shape.", "Line up the centers, then let go.", "#526283");
+  giveFeedback("Ready? Pick up a shape.", "Line up the centers, then let go.", MUTED);
   pieceRadius = sizes[level] - (roundNumber - 1) * 2;
   fitTolerance = max(6, tolerance[level] - (roundNumber - 1) * 2);
   const count = shapeCounts[level];
@@ -166,15 +213,7 @@ function startRound(freshLayout = true) {
 }
 
 function drawGame() {
-  words(levels[level], center - panelWidth / 2 + 55, 141, 14, "#5e6a82", true);
-  words("ROUND " + roundNumber + " / 3", center + panelWidth / 2 - 66, 141, 13, "#5e6a82", true);
-  for (let i = 1; i <= 3; i++) {
-    noStroke();
-    fill(i < roundNumber ? "#35aa65" : i === roundNumber ? "#2d6cf0" : "#e0e9f5");
-    circle(center + (i - 2) * 18, 141, 9);
-  }
   drawTimeBar();
-  words(matched + " / " + shapes.length + " matched", center + panelWidth / 2 - 84, 175, 18, "#142878", true);
   const spread = min(panelWidth - 28, 570) * 0.27;
   words("PICK UP", center - spread, 237, 11, "#718299", true);
   words("MATCH HERE", center + spread, 237, 11, "#718299", true);
@@ -185,11 +224,11 @@ function drawGame() {
     let shade = "#8998b0";
     if (held >= 0 && shapes[held] === s) {
       const distance = dist(s.x, s.y, s.targetX, s.targetY);
-      if (distance < pieceRadius * 2) shade = distance <= fitTolerance ? "#239c5d" : "#d69925";
+      if (distance < pieceRadius * 2) shade = distance <= fitTolerance ? GREEN : "#d69925";
     }
     shapeIcon(s.type, s.targetX, s.targetY, pieceRadius, shade, false);
     if (s.done) {
-      shapeIcon(s.type, s.targetX, s.targetY, pieceRadius + 4, "#35aa65", false);
+      shapeIcon(s.type, s.targetX, s.targetY, pieceRadius + 4, GREEN, false);
       if (!s.motion) drawCheck(s.targetX + pieceRadius * 0.75, s.targetY - pieceRadius * 0.75);
     }
   }
@@ -202,33 +241,55 @@ function drawGame() {
   drawFeedback();
 }
 
+// The top bar, laid out like the one in Car Obstacles: pause, progress bar, round counter, level name
+function drawTopBar() {
+  noStroke();
+  fill(255, 150);
+  rect(0, 0, 390, 92);
+  const over = screen === "playing" && dist(pointerX(), pointerY(), 40, 50) < 24;
+  if (over) cursor("pointer");
+  fill(0, 30);
+  circle(40, 53, 46);
+  fill(over ? LIGHT_BLUE : "#ffffff");
+  circle(40, 50, 46);
+  fill(BLUE);
+  rect(32, 40, 6, 20, 2);
+  rect(42, 40, 6, 20, 2);
+  if (screen === "playing") btns.push({ x: 16, y: 26, w: 48, h: 48, fn: pauseRound });
+
+  fill(BORDER);
+  rect(80, 44, 210, 14, 7);
+  if (matched) { fill(GREEN); rect(80, 44, 210 * matched / shapes.length, 14, 7); }
+
+  fill(BLUE);
+  rect(304, 34, 64, 32, 16);
+  words(roundNumber + "/3", 336, 50, 16, "#ffffff", true);
+  words(levels[level] + " - " + shapes.length + " shapes", 185, 76, 13, NAVY, true);
+}
+
 function drawTimeBar() {
+  words(matched + " / " + shapes.length + " matched", 360, 121, 16, NAVY, true, RIGHT);
   if (practice) {
-    words("No timer", center - panelWidth / 2 + 70, 181, 18, "#2d6cf0", true);
-    noStroke();
-    fill("#e6f1eb");
-    rect(center - panelWidth / 2 + 24, 207, panelWidth - 48, 7, 4);
-    fill("#35aa65");
-    if (matched) rect(center - panelWidth / 2 + 24, 207, (panelWidth - 48) * matched / shapes.length, 7, 4);
+    words("No timer", 30, 121, 18, BLUE, true, LEFT);
     return;
   }
   const shade = timeLeft > 10 ? "#258fff" : timeLeft > 5 ? "#e3a126" : "#dd4b59";
-  words(ceil(timeLeft) + "s left", center - panelWidth / 2 + 70, 175, 21, shade, true);
-  const x = center - panelWidth / 2 + 24, w = panelWidth - 48;
+  words(ceil(timeLeft) + "s left", 30, 121, 21, shade, true, LEFT);
+  const x = 30, w = 330;
   const elapsed = 1 - timeLeft / 30;
   noStroke();
   fill("#e4f1fa");
-  rect(x, 199, w, 14, 7);
+  rect(x, 141, w, 14, 7);
   fill(shade);
-  if (timeLeft > 0) rect(x + w * elapsed, 199, w * (1 - elapsed), 14, 7);
+  if (timeLeft > 0) rect(x + w * elapsed, 141, w * (1 - elapsed), 14, 7);
   stroke("#ffffff");
   strokeWeight(2);
-  circle(x + w * elapsed, 206, 19);
+  circle(x + w * elapsed, 148, 19);
   // The marker moves left to right as the colored time runs out.
   if (timeLeft <= 5 && screen === "playing") {
     noFill();
     stroke(221, 75, 89, 80 + sin(playTime * 4) * 40);
-    rect(x - 4, 195, w + 8, 22, 11);
+    rect(x - 4, 137, w + 8, 22, 11);
   }
 }
 
@@ -310,7 +371,7 @@ function giveFeedback(title, detail, shade) {
 function drawFeedback() {
   let title = feedbackTime > 0 ? message : "Keep going — you've got this!";
   let detail = feedbackTime > 0 ? messageDetail : "Center it in the matching outline.";
-  let shade = feedbackTime > 0 ? messageColor : "#526283";
+  let shade = feedbackTime > 0 ? messageColor : MUTED;
   if (held >= 0) {
     const s = shapes[held], d = dist(s.x, s.y, s.targetX, s.targetY);
     title = "Find the matching outline";
@@ -319,7 +380,7 @@ function drawFeedback() {
     if (d <= fitTolerance) {
       title = "Perfect position — let go!";
       detail = "The green outline means it fits.";
-      shade = "#239c5d";
+      shade = GREEN;
     } else if (d < pieceRadius * 2) {
       title = "Nearly there!";
       detail = abs(s.targetX - s.x) > abs(s.targetY - s.y)
@@ -330,20 +391,24 @@ function drawFeedback() {
   }
   noStroke();
   fill("#f1f8fd");
-  rect(center - panelWidth / 2 + 18, 620, panelWidth - 36, 50, 12);
+  rect(30, 620, 330, 50, 12);
   words(title, center, 636, min(18, panelWidth / 17), shade, true);
-  words(detail, center, 656, min(15, panelWidth / 22), "#526283");
+  words(detail, center, 656, min(15, panelWidth / 22), MUTED);
 }
 
 function drawPause() {
+  btns = [];                       // nothing underneath can be tapped while paused
   noStroke();
-  fill(240, 249, 255, 245);
-  rect(center - panelWidth / 2, 118, panelWidth, 612, 24);
-  words("Take a break", center, 248, 30, "#142878", true);
-  words(practice ? "Your shapes are safe here." : "Your timer is paused.", center, 301, 20, "#526283");
-  button("Resume round", 402);
-  button("Restart this round", 480, "#f0f8ff");
-  button("Change difficulty", 558, "#f0f8ff");
+  fill(27, 42, 90, 150);
+  rect(0, 0, 390, 760);
+  fill(255);
+  rect(45, 200, 300, 372, 24);
+  words("Paused", center, 245, 26, NAVY, true);
+  words(practice ? "Your shapes are safe here." : "Your timer is paused.", center, 277, 15, MUTED);
+  button("Resume", 75, 300, 240, 52, "primary", () => { screen = "playing"; });
+  button("Restart", 75, 367, 240, 52, "secondary", () => startRound(false));
+  button("Change level", 75, 434, 240, 52, "secondary", () => requestLeave("levels"));
+  button("Home", 75, 501, 240, 52, "secondary", () => requestLeave("home"));
 }
 
 function finish(ranOutOfTime) {
@@ -383,37 +448,98 @@ function readBest() {
   catch { storageAvailable = false; return 0; }
 }
 
+// The numbers the results page shows (a finished session, or just one round)
+function resultInfo() {
+  const finalRound = roundNumber === 3, stats = sessionStats();
+  return { finalRound, stats, score: finalRound ? stats.score : accuracy() };
+}
+
 function drawResults() {
-  const finalRound = roundNumber === 3;
-  const stats = sessionStats();
-  const score = finalRound ? stats.score : accuracy();
+  const { finalRound, stats, score } = resultInfo();
+  const passed = score >= 70, stars = score >= 90 ? 3 : score >= 80 ? 2 : passed ? 1 : 0;
   resultAge += deltaTime / 1000;
-  const pop = 1 + sin(min(1, resultAge / 0.6) * PI) * 0.16;
-  shapeIcon(3, center, 210, 54 * pop, "#ffcf48", true);
-  if ((!timeUp || finalRound) && resultAge < 1.6) {
+
+  // falling confetti when they did well
+  if (passed) {
     noStroke();
-    for (let i = 0; i < 18; i++) {
-      fill(colors[i % colors.length]);
-      const x = center + sin(i * 7) * min(panelWidth / 2 - 20, 140) * min(1, resultAge * 3);
-      rect(x, 160 + (i % 4) * 18 + resultAge * 60, 6, 10, 2);
+    for (let i = 0; i < 50; i++) {
+      push();
+      translate((i * 73 + i * i * 7) % 390, ((i * 131 + resultAge * (60 + (i % 4) * 25)) % 800) - 40);
+      rotate(resultAge * (2 + (i % 3)) + i);
+      fill(CONFETTI[i % 5]);
+      rect(-4, -6, 8, 12, 2);
+      pop();
     }
   }
+
+  // star buddy (happy or sad), bouncing a little
+  drawStarBuddy(center, 190 + sin(frameCount * 0.08) * 6, passed);
+  words(finalRound ? "Session complete!" : timeUp ? "Round finished" : "Great match!", center, 335, 34, NAVY, true);
+
+  for (let i = 0; i < 3; i++) drawStar(center - 70 + i * 70, i === 1 ? 392 : 400, 28, 13, i < stars ? GOLD : STAR_OFF);
+
+  words("Accuracy", center, 452, 17, MUTED);
+  words(score + "%", center, 486, 30, passed ? GREEN : RED, true);
+  words(finalRound ? stats.correct + " / " + stats.total + " shapes  ·  " + levels[level] + ", 3 rounds"
+                   : matched + " / " + shapes.length + " matched  ·  " + levels[level] + ", round " + roundNumber + " of 3", center, 514, 14, MUTED);
+  words(finalRound ? stats.misses + " missed drops" : (attempts - matched) + " missed drops  ·  " + (shapes.length - matched) + " unmatched", center, 536, 14, MUTED);
+  if (finalRound) words((newBest ? "New personal best!  " : "Best: ") + personalBest + "%" + (storageAvailable ? "" : " (this visit only)"), center, 558, 14, GREEN, true);
+  else words("Fresh positions in the next round.", center, 558, 14, MUTED);
+
+  button(finalRound ? "Play Again" : "Next Round", 30, 584, 330, 56, "primary", () => {
+    if (roundNumber === 3) startSession();
+    else { roundNumber++; startRound(); }
+  });
+  button(finalRound ? "Choose Level" : "Retry Round", 30, 652, 330, 56, "secondary", () => {
+    if (roundNumber === 3) screen = "levels";
+    else startRound(false);
+  });
+}
+
+// The happy / sad star from the Car Obstacles results page
+function drawStar(x, y, r1, r2, col) {
+  push();
+  translate(x, y);
   noStroke();
-  fill("#775320");
-  circle(center - 14, 204, 6);
-  circle(center + 14, 204, 6);
-  noFill();
-  stroke("#775320");
-  strokeWeight(3);
-  arc(center, 215, 20, 14, 0, PI);
-  words(finalRound ? "Session complete!" : timeUp ? "Round finished" : "Great match!", center, 310, min(30, panelWidth / 11), "#1b2a5a", true);
-  words(score + "% accuracy", center, 365, 29, "#2d6cf0", true);
-  words(finalRound ? stats.correct + " / " + stats.total + " shapes · 3 rounds" : matched + " / " + shapes.length + " matched · Round " + roundNumber + " / 3", center, 410, 18, "#5e6a82");
-  words(finalRound ? stats.misses + " missed drops" : (attempts - matched) + " missed drops · " + (shapes.length - matched) + " unmatched", center, 444, min(16, panelWidth / 22), "#5e6a82");
-  words(finalRound ? (newBest ? "New personal best!  " : "Best: ") + personalBest + "%" : "Fresh positions in the next round.", center, 485, 17, "#239c5d", true);
-  if (finalRound) words(storageAvailable ? "Saved on this device" : "For this visit", center, 510, 12, "#5e6a82");
-  button(finalRound ? "Play again  ↻" : "Next round  →", 534);
-  button(finalRound ? "Choose difficulty" : "Retry this round", 602, "#f0f8ff");
+  fill(col);
+  beginShape();
+  for (let i = 0; i < 10; i++) {
+    const a = -HALF_PI + i * PI / 5, r = i % 2 === 0 ? r1 : r2;
+    vertex(cos(a) * r, sin(a) * r);
+  }
+  endShape(CLOSE);
+  pop();
+}
+
+function drawStarBuddy(x, y, happy) {
+  noStroke();
+  fill(255, 220, 90, 70);
+  circle(x, y, 230);
+  drawStar(x, y + 6, 100, 48, GOLD_DARK);
+  drawStar(x, y, 96, 45, GOLD);
+  fill(NAVY);
+  ellipse(x - 22, y - 8, 14, 18);
+  ellipse(x + 22, y - 8, 14, 18);
+  fill(255);
+  circle(x - 19, y - 12, 5);
+  circle(x + 25, y - 12, 5);
+  fill(255, 140, 140, 150);
+  ellipse(x - 40, y + 12, 18, 10);
+  ellipse(x + 40, y + 12, 18, 10);
+  if (happy) {
+    fill(NAVY);
+    arc(x, y + 14, 40, 34, 0, PI, CHORD);
+    fill("#FF7A7A");
+    ellipse(x, y + 26, 18, 8);
+  } else {
+    noFill();
+    stroke(NAVY);
+    strokeWeight(4);
+    arc(x, y + 32, 30, 22, PI + 0.3, TWO_PI - 0.3);
+    noStroke();
+    fill("#7CC4FF");
+    ellipse(x + 26, y + 10, 8, 12);
+  }
 }
 
 // One function draws both colored shapes and their outlines.
@@ -444,77 +570,66 @@ function shapeIcon(type, x, y, radius, shade, solid) {
   pop();
 }
 
-function words(label, x, y, size, shade, bold = false) {
+function words(label, x, y, size, shade, bold = false, align = CENTER) {
   noStroke();
   fill(shade);
   textSize(size);
   textLeading(size * 1.3);
   textStyle(bold ? BOLD : NORMAL);
+  textAlign(align, CENTER);
   text(label, x, y);
 }
 
-function button(label, y, shade = "#0088ff", detail = "") {
-  const w = min(panelWidth - 40, 360);
-  if (overButton(y)) cursor("pointer");
+// style: "primary" (solid blue), "secondary" (white, blue outline) or "danger" (red outline).
+// Draws the button and remembers where it is, so mousePressed can run fn when it is tapped.
+function button(label, x, y, w, h, style, fn) {
+  const over = hitBox(x, y, w, h), primary = style === "primary", danger = style === "danger";
+  const accent = danger ? RED : BLUE, off = over && mouseIsPressed ? 2 : 0;
+  if (over) cursor("pointer");
   noStroke();
-  fill(27, 42, 90, 8);
-  rect(center - w / 2, y + 3, w, 58, 18);
-  fill(shade);
-  stroke(overButton(y) ? "#204da1" : "#c6e1f2");
-  strokeWeight(overButton(y) ? 3 : 1);
-  rect(center - w / 2, y, w, 58, 20);
-  words(label, center, y + (detail ? 20 : 29), 22, shade === "#0088ff" ? "#ffffff" : "#142878", true);
-  if (detail) words(detail, center, y + 43, 14, "#526283");
+  fill(0, 30);
+  rect(x, y + 4, w, h, 14);
+  stroke(accent);
+  strokeWeight(2);
+  fill(primary ? (over ? BLUE_HOVER : BLUE) : over ? (danger ? "#FBD5D7" : LIGHT_BLUE) : (danger ? "#FDECEC" : "#ffffff"));
+  rect(x, y + off, w, h, 14);
+  noStroke();
+  words(label, x + w / 2, y + h / 2 + off, h >= 54 ? 21 : 19, primary ? "#ffffff" : accent, true);
+  btns.push({ x, y, w, h, fn });
 }
 
-function pointerX() { return mouseX / zoom; }
+// A two-way choice (like the timer): the chosen option is solid blue
+function toggle(label, x, y, w, h, selected, fn) {
+  const over = hitBox(x, y, w, h);
+  if (over) cursor("pointer");
+  fill(selected ? BLUE : "#ffffff");
+  stroke(selected || over ? BLUE : BORDER);
+  strokeWeight(selected || over ? 2 : 1);
+  rect(x, y, w, h, 14);
+  noStroke();
+  words(label, x + w / 2, y + h / 2, 16, selected ? "#ffffff" : NAVY, true);
+  btns.push({ x, y, w, h, fn });
+}
+
+// A white card with a thin border, like the cards on the other Tiny Touch pages
+function card(x, y, w, h) {
+  push();
+  stroke(BORDER);
+  strokeWeight(1);
+  fill("#ffffff");
+  rect(x, y, w, h, 18);
+  pop();
+}
+
+function pointerX() { return mouseX / zoom - offsetX; }
 function pointerY() { return mouseY / zoom - offsetY; }
-function overButton(y) {
-  return abs(pointerX() - center) < min(panelWidth - 40, 360) / 2 && pointerY() > y && pointerY() < y + 58;
-}
-
 function mousePressed(event) {
-  // A leave confirmation blocks every other control underneath it.
-  if (screen === "leave") {
-    if (overButton(420)) screen = leaveFrom;
-    else if (overButton(496)) performLeave();
-    return false;
+  // Buttons first. Each one was saved by button() or toggle() while drawing.
+  for (let i = btns.length - 1; i >= 0; i--) {
+    const b = btns[i];
+    if (hitBox(b.x, b.y, b.w, b.h)) { b.fn(); return false; }
   }
-  const edge = center - panelWidth / 2 + 16;
-  if (hitBox(edge, 18, 72, 52)) { goBack(); return false; }
-  if (hitBox(center + panelWidth / 2 - 88, 18, 72, 52)) { requestLeave("home"); return false; }
-  if (screen !== "exit") {
-    if (screen === "playing" || screen === "finishing") {
-      const w = (min(panelWidth - 40, 360) - 12) / 2;
-      if (hitBox(center - w - 6, 678, w, 52) && screen === "playing") { pauseRound(); return false; }
-      if (hitBox(center + 6, 678, w, 52)) { requestLeave("exit"); return false; }
-    } else if (overButton(678)) { requestLeave("exit"); return false; }
-  }
-  if (screen === "levels") {
-    const w = min(panelWidth - 40, 360);
-    if (hitBox(center - w / 2, 300, (w - 8) / 2, 52)) practice = false;
-    if (hitBox(center + 4, 300, (w - 8) / 2, 52)) practice = true;
-    for (let i = 0; i < 4; i++) {
-      if (overButton(367 + i * 72)) { level = i; screen = "instructions"; }
-    }
-  } else if (screen === "instructions") {
-    if (overButton(589)) startSession();
-  } else if (screen === "results") {
-    if (overButton(534)) {
-      if (roundNumber === 3) startSession();
-      else { roundNumber++; startRound(); }
-    } else if (overButton(602)) {
-      if (roundNumber === 3) screen = "levels";
-      else startRound(false);
-    }
-  } else if (screen === "paused") {
-    if (overButton(402)) screen = "playing";
-    else if (overButton(480)) startRound(false);
-    else if (overButton(558)) requestLeave("levels");
-  } else if (screen === "exit") {
-    if (overButton(574)) screen = "levels";
-    else if (overButton(652)) requestLeave("home");
-  } else if (screen === "playing") {
+  if (screen === "playing") {
     const usingTouch = event && (event.pointerType === "touch" || event.type === "touchstart");
     // Bigger touch areas can overlap: pick the closest available shape.
     let nearest = usingTouch ? max(pieceRadius + 18, 32 / zoom) : pieceRadius + 8;
@@ -566,7 +681,7 @@ function mouseReleased() {
     s.successAt = playTime;
     movePiece(s, "snap");
     matched++;
-    giveFeedback("Matched! Nice work.", matched === shapes.length ? "You matched every shape!" : (shapes.length - matched) + " shapes left. Keep going!", "#239c5d");
+    giveFeedback("Matched! Nice work.", matched === shapes.length ? "You matched every shape!" : (shapes.length - matched) + " shapes left. Keep going!", GREEN);
     if (matched === shapes.length) {
       completedAt = playTime;
       screen = "finishing";
@@ -579,7 +694,7 @@ function mouseReleased() {
     s.dropY = s.y;
     s.redUntil = playTime + 0.9;
     movePiece(s, "return");
-    giveFeedback(wrongTarget ? "Different shape — try again." : distance < pieceRadius * 2 ? "Almost! Line up the centers." : "Not quite inside the outline.", "Try again when the shape returns.", "#bf3f4b");
+    giveFeedback(wrongTarget ? "Different shape — try again." : distance < pieceRadius * 2 ? "Almost! Line up the centers." : "Not quite inside the outline.", "Try again when the shape returns.", RED);
   }
   return false;
 }
@@ -598,21 +713,7 @@ function pauseRound() {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  // Reposition the board safely after an orientation change.
-  if (screen === "playing" || screen === "paused" || screen === "finishing") {
-    zoom = min(1, height / 760);
-    center = width / zoom / 2;
-    panelWidth = min(width / zoom - 32, 720);
-    const spread = min(panelWidth - 28, 570) * 0.27;
-    for (let s of shapes) {
-      s.homeX = center - spread;
-      s.targetX = center + spread;
-      s.x = s.done ? s.targetX : s.homeX;
-      s.y = s.done ? s.targetY : s.homeY;
-      s.motion = "";
-    }
-    held = -1;
-  }
+  held = -1;   // drop anything being dragged; the page rescales itself in draw()
 }
 
 
@@ -621,32 +722,24 @@ function hitBox(x, y, w, h) {
   return pointerX() > x && pointerX() < x + w && pointerY() > y && pointerY() < y + h;
 }
 
-function smallButton(label, x, y, w, selected = false) {
-  const hover = hitBox(x, y, w, 52);
+// The same chevron back arrow the other Tiny Touch screens use
+// The same chevron back arrow the other Tiny Touch screens use
+function drawBackArrow(fn) {
+  const hover = hitBox(15, 30, 40, 40);
   if (hover) cursor("pointer");
-  fill(selected ? "#2d6cf0" : "#f3f7fd");
-  stroke(hover ? "#2d6cf0" : "#dce6f2");
-  strokeWeight(1);
-  rect(x, y, w, 52, 16);
-  words(label, x + w / 2, y + 26, 16, selected ? "#ffffff" : "#1b2a5a", true);
-}
-
-function drawNavigation() {
-  smallButton("‹ Back", center - panelWidth / 2 + 16, 18, 72);
-  smallButton("⌂ Home", center + panelWidth / 2 - 88, 18, 72);
-  if (screen === "exit") return;
-  const w = min(panelWidth - 40, 360);
-  if (screen === "playing" || screen === "finishing") {
-    const half = (w - 12) / 2;
-    smallButton(screen === "finishing" ? "✓ Done" : "Ⅱ Pause", center - half - 6, 678, half);
-    smallButton("× Exit", center + 6, 678, half);
-  } else smallButton("× Exit game", center - w / 2, 678, w);
+  stroke(hover ? BLUE_HOVER : NAVY);
+  strokeWeight(3);
+  noFill();
+  line(36, 40, 26, 50);
+  line(26, 50, 36, 60);
+  noStroke();
+  btns.push({ x: 15, y: 30, w: 40, h: 40, fn });
 }
 
 function goBack() {
   if (screen === "leave") screen = leaveFrom;
   else if (screen === "levels") requestLeave("home");
-  else if (screen === "instructions" || screen === "exit") screen = "levels";
+  else if (screen === "instructions") screen = "levels";
   else if (screen === "playing") pauseRound();
   else if (screen === "paused") screen = "playing";
   else if (screen === "results") requestLeave("levels");
@@ -665,32 +758,20 @@ function performLeave() {
   held = -1;
   shapes = [];
   if (leaveTo === "home" && HOME_URL) window.location.assign(HOME_URL);
-  else screen = leaveTo === "levels" ? "levels" : "exit";
+  else screen = "levels";
 }
 
 function drawLeave() {
-  noStroke();
-  fill("#ffffff");
-  rect(center - panelWidth / 2, 16, panelWidth, 728, 28);
-  words("TINY TOUCH", center, 70, 13, "#2d6cf0", true);
-  words("Leave this session?", center, 255, min(29, panelWidth / 11), "#1b2a5a", true);
-  words(roundResults.length + " of 3 rounds finished.", center, 306, 19, "#5e6a82");
-  words("Your current session will end.\nYour saved personal best will stay.", center, 357, min(17, panelWidth / 21), "#5e6a82");
-  button("Keep playing", 420);
-  button(leaveTo === "home" ? "Leave and go home" : "Leave session", 496, "#ffe3e5");
-}
-
-function drawExit() {
-  shapeIcon(3, center, 229, 49, "#ffcf48", true);
-  words("See you next time!", center, 340, min(29, panelWidth / 11), "#1b2a5a", true);
-  words("Every little bit of practice counts.", center, 398, min(18, panelWidth / 21), "#5e6a82");
-  words("You're out of the game now.", center, 438, 16, "#5e6a82");
-  button("Play again", 574);
-  button("Go home", 652, "#f0f8ff");
+  card(30, 200, 330, 330);
+  words("Leave this session?", center, 255, 24, NAVY, true);
+  words(roundResults.length + " of 3 rounds finished.", center, 305, 16, MUTED);
+  words("Your current session will end.\nYour saved personal best will stay.", center, 350, 15, MUTED);
+  button("Keep playing", 60, 400, 270, 52, "primary", () => { screen = leaveFrom; });
+  button(leaveTo === "home" ? "Leave and go home" : "Leave session", 60, 467, 270, 52, "danger", performLeave);
 }
 
 function drawCheck(x, y) {
-  noStroke(); fill("#239c5d"); circle(x, y, 18);
+  noStroke(); fill(GREEN); circle(x, y, 18);
   stroke("#ffffff"); strokeWeight(2);
   line(x - 4, y, x - 1, y + 3);
   line(x - 1, y + 3, x + 5, y - 4);

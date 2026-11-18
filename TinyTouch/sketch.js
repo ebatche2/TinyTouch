@@ -39,6 +39,10 @@ function goTo(name) {
     window.location.assign("shapes.html?from=app");
     return;
   }
+  if (name === "teeth.html") {          // Brush the Teeth is its own page too
+    window.location.assign("teeth.html?from=app");
+    return;
+  }
   if (PAGES[name]) nextPage = name;
   else console.log("No page called " + name);
 }
@@ -1939,6 +1943,7 @@ function homePage() {
 
       // which page each button opens (the rest just show the message for now)
       let pages = {
+        brush: "teeth.html",       // Brush the Teeth
         trace: "trace.html",       // Trace the Path
         drag: "shapes.html",      // Shape Matching
         car: "carobs.html",         // Car Obstacles
@@ -4047,7 +4052,8 @@ function traceResultPage() {
 const CAR_LEVELS = [
   { name: "Easy",   lanes: 2, speed: 2.6, gap: 85, color: "#7DD87A", dark: "#2EAD5B", stars: 1 },
   { name: "Medium", lanes: 3, speed: 3.2, gap: 72, color: "#FFE07A", dark: "#D9A400", stars: 2 },
-  { name: "Hard",   lanes: 4, speed: 3.9, gap: 62, color: "#FFB27A", dark: "#E07020", stars: 3 }
+  { name: "Hard",   lanes: 4, speed: 3.9, gap: 62, color: "#FFB27A", dark: "#E07020", stars: 3 },
+  { name: "Expert", lanes: 5, speed: 4.5, gap: 56, color: "#FF8A8A", dark: "#E5484D", stars: 4 }
 ];
 
 // how many cones come in round 1, round 2 and round 3 of every level
@@ -4250,7 +4256,7 @@ function carPage() {
     textSize(18);
     textStyle(on ? BOLD : NORMAL);
     textAlign(CENTER, CENTER);
-    text(lv.name + " - " + lv.lanes + " lanes", x + w / 2, y + h / 2);
+    text(lv.name + " - " + lv.lanes + " lanes", x + w / 2 + 24, y + h / 2);   // +24 keeps it clear of the stars
     textStyle(NORMAL);
 
     // check mark on the chosen one
@@ -4543,7 +4549,7 @@ function carPlayPage() {
 
   let cnv;
   let user = {};
-  let level = 0;          // 0 Easy, 1 Medium, 2 Hard
+  let level = 0;          // 0 Easy, 1 Medium, 2 Hard, 3 Expert
   let roundNum = 1;       // round 1, 2 or 3
   let cfg = CAR_LEVELS[0];
   let total = 8;          // cones in this round
@@ -4712,7 +4718,7 @@ function carPlayPage() {
     };
 
     // remember the best score for each level
-    if (!user.carBest) user.carBest = [0, 0, 0];
+    if (!user.carBest) user.carBest = [0, 0, 0, 0];
     user.carBest[level] = max(user.carBest[level] || 0, accuracy);
     saveUser(user);
 
@@ -4990,7 +4996,7 @@ function carResultPage() {
   let passed = false;
   let stars = 0;
   let confetti = [];
-  let allDone = false;    // finished Hard round 3
+  let allDone = false;    // finished Expert round 3 (the last level)
 
   // ---------- Layout ----------
   const BTN1_Y = 584;

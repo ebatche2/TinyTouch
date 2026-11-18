@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tiny Touch</title>
+<style>
+html,body{margin:0;padding:0}
+#app{width:390px}
+canvas{display:block;touch-action:none}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<script src="https://unpkg.com/ml5@1.2.2/dist/ml5.min.js"></script>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const W = 390, H = 760, CY = 430; // CY = bite line where top and bottom teeth meet
+// Colors shared with the rest of the Tiny Touch app
+const NAVY = '#1B2A5A', BLUE = '#2D6CF0', BLUE_HOVER = '#4A84F5', MUTED = '#5E6A82', BORDER = '#E3E8F1';
+const GOLD = '#FFC83D', STAR_OFF = '#C9CFDB', GREEN = '#2EAD5B', RED = '#E5484D', BG = '#F5F8FE', LIGHT_BLUE = '#EAF2FF';
+const GOLD_DARK = '#F2A900', CONFETTI = ['#2D6CF0', '#FFC83D', '#E36BD6', '#2EAD5B', '#FF6A1A'];
+const LV = [
+  {name:'Easy', n:3, w:108, h:170, k:350, items:1, color:'#7DD87A', dark:'#2EAD5B'},
+  {name:'Medium', n:4, w:80, h:150, k:500, items:1, color:'#FFE07A', dark:'#D9A400'},
+  {name:'Hard', n:6, w:52, h:130, k:700, items:2, color:'#FFB27A', dark:'#E07020'}];
+let scr = 'select', mode = 'camera', level = 0, teeth = [], btns = [], paused = false;
+let cam = null, handPose, hands = [];
+let last = null, sx = 0, sy = 0, onT = 0, tot = 0, t0 = 0, seen = 0, doneAt = 0, res = null;
+
+function preload() { handPose = ml5.handPose(); }
+function setup() {
+  createCanvas(W, H).parent('app');
+  textFont('Arial');
+  noStroke();
+}
+function gotHands(r) { hands = r; }
+function startCam() {
+  if (mode !== 'camera' || cam) return;
+  cam = createCapture(VIDEO);
+  cam.size(640, 480);
+  cam.hide();
+  handPose.detectStart(cam, gotHands);
+}
+
+// ---------- helpers ----------
+const HOME_URL = 'index.html#entry.html'; // the Tiny Touch app's Home screen
+// Leave the game and go back to the Tiny Touch Home screen
+function goHome() { window.location.assign(HOME_URL); }
+function txt(s, x, y, size, col, al = LEFT, wt = 800) {
+  push(); noStroke(); fill(col); textSize(size); textAlign(al, CENTER); textStyle(wt > 700 ? BOLD : NORMAL); text(s, x, y); pop();
+}
+// style: 'primary' (solid blue), 'secondary' (white, blue outline) or 'small' (secondary with smaller text)
+function btn(label, x, y, w, h, style, fn) {
+  const over = mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+  const primary = style === 'primary', off = over && mouseIsPressed ? 2 : 0;
+  if (over) cursor(HAND);
+  push(); noStroke(); fill(0, 30); rect(x, y + 4, w, h, 14);
+  stroke(BLUE); strokeWeight(2);
+  fill(primary ? (over ? BLUE_HOVER : BLUE) : (over ? LIGHT_BLUE : 255));
+  rect(x, y + off, w, h, 14); pop();
+  txt(label, x + w / 2, y + h / 2 + off, style === 'small' ? 14 : 21, primary ? '#fff' : BLUE, CENTER);
+  btns.push({x, y, w, h, fn});
+}
+// The same chevron back arrow every other Tiny Touch screen uses
+function backArrow(cy, fn) {
+  const over = mouseX > 15 && mouseX < 55 && mouseY > cy - 20 && mouseY < cy + 20;
+  if (over) cursor(HAND);
+  push(); stroke(over ? BLUE_HOVER : NAVY); strokeWeight(3); noFill();
+  line(36, cy - 10, 26, cy); line(26, cy, 36, cy + 10); pop();
+  btns.push({x: 15, y: cy - 20, w: 40, h: 40, fn});
+}
+function star(cx, cy, r, col) {
+  push(); noStroke(); fill(col); beginShape();
+  for (let i = 0; i < 10; i++) { const a = -HALF_PI + i * PI / 5, rr = i % 2 ? r * 0.45 : r; vertex(cx + cos(a) * rr, cy + sin(a) * rr); }
+  endShape(CLOSE); pop();
+}
+function card(x, y, w, h) { push(); stroke(BORDER); strokeWeight(1); fill('#ffffff'); rect(x, y, w, h, 18); pop(); }
+// A two-way choice (like camera or mouse): the chosen option is solid blue
+function toggle(label, x, y, w, h, selected, fn) {
+  const over = mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+  if (over) cursor(HAND);
+  push(); fill(selected ? BLUE : '#ffffff'); stroke(selected || over ? BLUE : BORDER); strokeWeight(selected || over ? 2 : 1);
+  rect(x, y, w, h, 14); pop();
+  txt(label, x + w / 2, y + h / 2, 16, selected ? '#fff' : NAVY, CENTER);
+  btns.push({x, y, w, h, fn});
+}
+// The happy / sad star from the Car Obstacles results page
+function starBuddy(x, y, happy) {
+  push(); noStroke(); fill(255, 220, 90, 70); circle(x, y, 230);
+  star(x, y + 6, 100, GOLD_DARK); star(x, y, 96, GOLD);
+  noStroke(); fill(NAVY); ellipse(x - 22, y - 8, 14, 18); ellipse(x + 22, y - 8, 14, 18);
+  fill(255); circle(x - 19, y - 12, 5); circle(x + 25, y - 12, 5);
+  fill(255, 140, 140, 150); ellipse(x - 40, y + 12, 18, 10); ellipse(x + 40, y + 12, 18, 10);
+  if (happy) { fill(NAVY); arc(x, y + 14, 40, 34, 0, PI, CHORD); fill('#FF7A7A'); ellipse(x, y + 26, 18, 8); }
+  else { noFill(); stroke(NAVY); strokeWeight(4); arc(x, y + 32, 30, 22, PI + 0.3, TWO_PI - 0.3); noStroke(); fill('#7CC4FF'); ellipse(x + 26, y + 10, 8, 12); }
+  pop();
+}
+function savedBest() { try { return JSON.parse(localStorage.getItem('fms') || '{}'); } catch (e) { return {}; } }
+
+// ---------- teeth ----------
+function randItems(c) {
+  const t1 = floor(random(7)), a = [t1];
+  if (c.items > 1) a.push((t1 + 1 + floor(random(6))) % 7);
+  return a;
+}
+function startLevel(l) {
+  level = l; const c = LV[l], gap = 6, x0 = (W - (c.n * c.w + (c.n - 1) * gap)) / 2;
+  teeth = [];
+  for (let i = 0; i < c.n; i++) {
+    [true, false].forEach(up => teeth.push({
+      x: x0 + i * (c.w + gap), y: up ? CY - c.h : CY, w: c.w, h: c.h, up, clean: 0, s: floor(random(1000)),
+      g: randItems(c).map(type => ({type, dx: random(-c.w * 0.12, c.w * 0.12), rot: random(-0.6, 0.6)}))
+    }));
+  }
+  last = null; onT = 0; tot = 0; t0 = 0; doneAt = 0; res = null; paused = false; seen = millis(); scr = 'play';
+}
+function drawTooth(t) {
+  const r = min(t.w * 0.4, t.h * 0.45), clean = t.clean >= 1;
+  push();
+  stroke(clean ? GREEN : '#cbbf9f'); strokeWeight(clean ? 5 : 3); fill('#fffef6');
+  if (t.up) rect(t.x - 3, t.y, t.w + 6, t.h, 8, 8, r, r); else rect(t.x - 3, t.y, t.w + 6, t.h, r, r, 8, 8);
+  noStroke(); fill(184, 145, 60, 200 * (1 - t.clean));
+  const y0 = t.up ? t.y + 44 : t.y + 16;
+  for (let k = 0; k < 6; k++) {
+    const a = ((t.s * 13 + k * 47) % 100) / 100, b = ((t.s * 29 + k * 31) % 100) / 100;
+    circle(t.x + 12 + a * (t.w - 24), y0 + b * (t.h - 62), t.w * 0.07 + (k % 3) * 2);
+  }
+  stroke(255, 255, 255, 230); strokeWeight(4); strokeCap(ROUND);
+  line(t.x + t.w * 0.2, t.y + t.h * (t.up ? 0.4 : 0.4), t.x + t.w * 0.2, t.y + t.h * (t.up ? 0.6 : 0.65));
+  pop();
+  gunk(t);
+  if (clean) star(t.x + t.w / 2, t.y + t.h / 2, 18, GOLD);
+}
+function gunk(t) {
+  const al = 255 * (1 - t.clean); if (al < 8) return;
+  const n = t.g.length, sc = n > 1 ? 0.75 : constrain(t.w / 95, 0.8, 1.4);
+  const ys = n > 1 ? (t.up ? [0.5, 0.78] : [0.22, 0.5]) : (t.up ? [0.62] : [0.4]);
+  t.g.forEach((it, i) => {
+    push(); translate(t.x + t.w / 2 + it.dx, t.y + t.h * ys[i]); rotate(it.rot); scale(sc); noStroke();
+    drawItem(it.type, al); pop();
+  });
+}
+function drawItem(type, a) {
+  if (type === 0) { // spinach
+    fill(46, 125, 50, a); ellipse(0, 0, 46, 20); ellipse(-12, 8, 20, 12); triangle(20, 0, 30, -4, 30, 4);
+    stroke(27, 94, 32, a); strokeWeight(2); line(-18, 0, 24, 0);
+  } else if (type === 1) { // ladybug
+    stroke(30, a); strokeWeight(2); [-8, 0, 8].forEach(y => { line(-12, y, -20, y + 3); line(12, y, 20, y + 3); });
+    noStroke(); fill(205, 35, 35, a); ellipse(0, 2, 30, 26); fill(30, a); circle(0, -13, 13); rect(-1, -10, 2, 24);
+    circle(-7, -2, 5); circle(7, -2, 5); circle(-6, 8, 5); circle(6, 8, 5);
+  } else if (type === 2) { // corn kernel
+    fill(250, 210, 60, a); ellipse(0, 0, 26, 32); fill(255, 240, 150, a); ellipse(-4, -6, 9, 12);
+  } else if (type === 3) { // pink gum
+    fill(240, 110, 170, a); ellipse(0, 0, 40, 24); ellipse(11, -6, 20, 16); fill(255, 170, 205, a); ellipse(-8, -3, 10, 6);
+  } else if (type === 4) { // pizza bit
+    fill(240, 170, 50, a); triangle(-20, -14, 20, -14, 0, 20); fill(200, 50, 40, a); circle(-5, -5, 12); circle(8, -8, 9);
+  } else if (type === 5) { // worm
+    noFill(); stroke(230, 150, 140, a); strokeWeight(8); strokeCap(ROUND); bezier(-18, 4, -8, -14, 6, 16, 18, -4);
+    noStroke(); fill(60, a); circle(18, -4, 4);
+  } else { // pea
+    fill(120, 190, 70, a); circle(0, 0, 26); fill(175, 225, 115, a); circle(-5, -5, 8);
+  }
+}
+function drawMouth() {
+  const h = LV[level].h, top = CY - h - 40, bot = CY + h + 40;
+  fill('#6e1a2a'); rect(10, top, 370, bot - top, 80);
+  teeth.forEach(drawTooth);
+  fill('#f0868f');
+  rect(20, top + 10, 350, 50, 50, 50, 0, 0); rect(20, bot - 60, 350, 50, 0, 0, 50, 50);
+  teeth.forEach(t => ellipse(t.x + t.w / 2, t.up ? top + 60 : bot - 60, t.w + 4, 40));
+  push(); noFill(); stroke('#d9625a'); strokeWeight(20); rect(10, top, 370, bot - top, 80); pop();
+}
+function drawBrush(x, y, sc = 1, flip = false) {
+  push(); translate(x, y); scale(sc, flip ? -sc : sc); noStroke();
+  fill(130, 185, 55); rect(40, -4, 170, 24, 12);
+  rect(-52, -8, 104, 32, 14);
+  stroke(95, 145, 32); strokeWeight(3); strokeCap(ROUND); line(-36, 2, 196, 2);
+  stroke(205, 232, 135); strokeWeight(6);
+  line(84, -2, 78, 18); line(100, -2, 94, 18); line(116, -2, 110, 18);
+  noStroke();
+  for (let i = 0; i < 10; i++) {
+    const bx = -44 + i * 9;
+    stroke(190, 205, 220); strokeWeight(1); fill(255); rect(bx, -32, 7, 26, 3); noStroke();
+    fill(185, 222, 245); rect(bx, -32, 7, 8, 3);
+  }
+  pop();
+}
+
+// ---------- input ----------
+function getPos() {
+  if (mode === 'mouse') return (mouseX > 0 && mouseX < W && mouseY > 0 && mouseY < H) ? {x: mouseX, y: mouseY} : null;
+  if (hands.length) {
+    const h = hands[0], k = h.index_finger_tip || h.keypoints[8];
+    return {x: (1 - k.x / 640) * W, y: (k.y / 480) * H};
+  }
+  return null;
+}
+function mousePressed() {
+  for (let i = btns.length - 1; i >= 0; i--) {
+    const b = btns[i];
+    if (mouseX > b.x && mouseX < b.x + b.w && mouseY > b.y && mouseY < b.y + b.h) { b.fn(); break; }
+  }
+}
+
+// ---------- screens ----------
+// Laid out like the select / instructions / play / result pages of Car Obstacles and Trace the Path
+// (the demo no longer draws its own card; each screen puts it inside a card)
+function drawDemo(cx, cy) {
+  const bx = cx + 80 * sin(frameCount * 0.05), low = floor(frameCount / 240) % 2 === 1;
+  fill('#6e1a2a'); rect(cx - 150, cy - 110, 300, 220, 28);
+  const tw = 40, x0 = cx - 108;
+  for (let r = 0; r < 2; r++) {
+    const up = r === 0, ty = up ? cy - 84 : cy, active = (r === 1) === low;
+    for (let i = 0; i < 5; i++) {
+      const tx = x0 + i * (tw + 4);
+      push(); stroke('#cbbf9f'); strokeWeight(2); fill('#fffef6');
+      if (up) rect(tx, ty, tw, 84, 4, 4, 16, 16); else rect(tx, ty, tw, 84, 16, 16, 4, 4);
+      pop();
+      const a = active ? 220 * constrain(abs(bx - (tx + tw / 2)) / 45, 0, 1) : 220;
+      noStroke(); fill(184, 145, 60, a);
+      circle(tx + 12, ty + (up ? 30 : 20), 9); circle(tx + 27, ty + (up ? 46 : 36), 11); circle(tx + 20, ty + (up ? 38 : 28), 7);
+    }
+  }
+  noStroke(); fill('#f0868f');
+  rect(cx - 146, cy - 106, 292, 34, 24, 24, 0, 0); rect(cx - 146, cy + 72, 292, 34, 0, 0, 24, 24);
+  push(); noFill(); stroke('#d9625a'); strokeWeight(8); rect(cx - 150, cy - 110, 300, 220, 28); pop();
+  drawBrush(bx, low ? cy + 20 : cy - 20, 0.45, low);
+}
+function selectScr() {
+  backArrow(50, goHome);
+  txt('Brush the Teeth', W / 2, 50, 24, NAVY, CENTER);
+
+  // preview card: the brush scrubs the plaque away
+  card(30, 90, 330, 180);
+  push(); translate(195, 180); scale(0.68); drawDemo(0, 0); pop();
+
+  txt('Clean the Plaque', W / 2, 305, 22, NAVY, CENTER);
+  txt('Brush it away with your finger.', W / 2, 333, 15, MUTED, CENTER, 400);
+  txt('Choose a level:', 34, 366, 14, NAVY, LEFT);
+  LV.forEach((c, i) => levelPill(i, 30, 392 + i * 58));
+  btn('Start', 30, 640, 330, 56, 'primary', () => scr = 'how');
+}
+// A level choice, drawn like the level pills in Car Obstacles
+function levelPill(i, x, y) {
+  const c = LV[i], w = 330, h = 48, on = level === i, over = mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+  if (over) cursor(HAND);
+  push(); noStroke(); fill(0, 20); rect(x, y + 3, w, h, 24);
+  fill(c.color); rect(x, y, w, h, 24);
+  if (on) { stroke(NAVY); strokeWeight(3); noFill(); rect(x, y, w, h, 24); }
+  pop();
+  for (let k = 0; k <= i; k++) star(x + 26 + k * 20, y + h / 2, 9, on ? '#FFFFFF' : c.dark);
+  txt(c.name + ' - ' + c.n * 2 + ' teeth', x + w / 2 + 24, y + h / 2, 18, NAVY, CENTER, on ? 800 : 400);   // +24 keeps it clear of the stars
+  if (on) { push(); stroke(NAVY); strokeWeight(3); line(x + w - 38, y + h / 2, x + w - 32, y + h / 2 + 6); line(x + w - 32, y + h / 2 + 6, x + w - 22, y + h / 2 - 6); pop(); }
+  btns.push({x, y, w, h, fn: () => { level = i; }});
+}
+function how() {
+  backArrow(50, () => scr = 'select');
+  txt('Brush the Teeth', W / 2, 50, 24, NAVY, CENTER);
+
+  // which level the player picked
+  const c = LV[level], label = c.name + '  ·  ' + c.n * 2 + ' teeth';
+  push(); textSize(14); textStyle(BOLD); const pillW = textWidth(label) + 32; pop();
+  push(); noStroke(); fill(BLUE); rect(W / 2 - pillW / 2, 78, pillW, 30, 15); pop();
+  txt(label, W / 2, 93, 14, '#fff', CENTER);
+
+  // demo card
+  card(30, 130, 330, 300);
+  drawDemo(195, 280);
+
+  txt('How to play', W / 2, 470, 19, NAVY, CENTER);
+  txt('Move your finger back and forth\nover the teeth until they sparkle.', W / 2, 512, 16, MUTED, CENTER, 400);
+  if (mode === 'camera') txt('Hold one hand up to the camera.', W / 2, 543, 13, MUTED, CENTER, 400);
+
+  // how to control it
+  toggle('Camera', 30, 560, 160, 44, mode === 'camera', () => mode = 'camera');
+  toggle('Mouse or touch', 200, 560, 160, 44, mode === 'mouse', () => mode = 'mouse');
+
+  btn('Start', 30, 640, 330, 56, 'primary', () => { startCam(); startLevel(level); });
+}
+function play() {
+  const now = millis(), p = (!res && !paused) ? getPos() : null;
+  if (!res && !paused) {
+    if (p) {
+      seen = now; if (!t0) t0 = now;
+      if (!last) { sx = p.x; sy = p.y; } else { sx += (p.x - sx) * 0.3; sy += (p.y - sy) * 0.3; }
+      if (last) {
+        const d = dist(sx, sy, last.x, last.y); tot += d;
+        const t = teeth.find(t => sx > t.x && sx < t.x + t.w && sy > t.y && sy < t.y + t.h);
+        if (t) { t.clean = min(1, t.clean + d / LV[level].k); onT += d; }
+      }
+      last = {x: sx, y: sy};
+    } else last = null;
+  }
+  const pr = teeth.reduce((a, t) => a + t.clean, 0) / teeth.length;
+  if (!res && !paused && pr >= 1 && !doneAt) doneAt = now;
+  if (!res && !paused && doneAt && now - doneAt > 700) finish();
+  if (res) { drawResult(); return; }
+
+  drawMouth();
+  if (last && !paused) drawBrush(last.x, last.y + 19);
+  if (mode === 'camera' && !paused && now - seen > 500) {   // hint pill, like the one in Car Obstacles
+    push(); noStroke(); fill(RED); rect(W / 2 - 150, 102, 300, 34, 17); pop();
+    txt('Show your hand to the camera', W / 2, 119, 15, '#fff', CENTER);
+  }
+  // camera preview, bottom center
+  if (mode === 'camera' && cam) {
+    push(); translate(W / 2 + 40, 654); scale(-1, 1); image(cam, 0, 0, 80, 60); pop();
+    push(); noFill(); stroke(BORDER); strokeWeight(2); rect(W / 2 - 40, 654, 80, 60, 4); pop();
+  }
+  topBar(pr);
+  if (paused) drawPause();
+}
+// The top bar, laid out like the one in Car Obstacles: pause, progress bar, counter, level name
+function topBar(pr) {
+  push(); noStroke(); fill(255, 150); rect(0, 0, W, 92);
+  const over = !paused && dist(mouseX, mouseY, 40, 50) < 24;
+  if (over) cursor(HAND);
+  fill(0, 30); circle(40, 53, 46); fill(over ? LIGHT_BLUE : 255); circle(40, 50, 46);
+  fill(BLUE); rect(32, 40, 6, 20, 2); rect(42, 40, 6, 20, 2);
+  fill(BORDER); rect(80, 44, 210, 14, 7);
+  if (pr > 0) { fill(GREEN); rect(80, 44, max(14, 210 * pr), 14, 7); }
+  fill(BLUE); rect(304, 34, 64, 32, 16);
+  pop();
+  txt(round(pr * 100) + '%', 336, 50, 16, '#fff', CENTER);
+  txt(LV[level].name + ' - ' + LV[level].n * 2 + ' teeth', 185, 76, 13, NAVY, CENTER);
+  if (!paused) btns.push({x: 16, y: 26, w: 48, h: 48, fn: () => { paused = true; last = null; }});
+}
+function drawPause() {
+  btns = [];                        // nothing underneath can be tapped while paused
+  push(); noStroke(); fill(27, 42, 90, 150); rect(0, 0, W, H); fill(255); rect(45, 200, 300, 372, 24); pop();
+  txt('Paused', W / 2, 245, 26, NAVY, CENTER);
+  txt(mode === 'camera' ? 'Your hand is not being tracked.' : 'Your progress is saved here.', W / 2, 277, 15, MUTED, CENTER, 400);
+  btn('Resume', 75, 300, 240, 52, 'primary', () => { paused = false; seen = millis(); });
+  btn('Restart', 75, 367, 240, 52, 'secondary', () => startLevel(level));
+  btn('Change level', 75, 434, 240, 52, 'secondary', () => { paused = false; scr = 'select'; });
+  btn('Home', 75, 501, 240, 52, 'secondary', goHome);
+}
+// The results page, laid out like the Car Obstacles one
+function drawResult() {
+  const passed = res.st >= 2, t = (millis() - res.at) / 1000;
+  background(passed ? '#EAF4FF' : '#FDEFF7');
+  if (passed) {   // falling confetti
+    for (let i = 0; i < 50; i++) {
+      push(); noStroke(); translate((i * 73 + i * i * 7) % W, ((i * 131 + t * (60 + (i % 4) * 25)) % 800) - 40);
+      rotate(t * (2 + (i % 3)) + i); fill(CONFETTI[i % 5]); rect(-4, -6, 8, 12, 2); pop();
+    }
+  }
+  starBuddy(W / 2, 190 + sin(frameCount * 0.08) * 6, passed);
+  txt(['Keep going!', 'Nice work!', 'Great Job!'][res.st - 1], W / 2, 335, 34, NAVY, CENTER);
+  for (let i = 0; i < 3; i++) star(W / 2 - 70 + i * 70, i === 1 ? 392 : 400, 28, i < res.st ? GOLD : STAR_OFF);
+  txt('Accuracy', W / 2, 452, 17, MUTED, CENTER, 400);
+  txt(res.acc + '%', W / 2, 486, 30, passed ? GREEN : RED, CENTER);
+  txt('Time ' + res.sec + 's  ·  ' + LV[level].name + ', ' + LV[level].n * 2 + ' teeth', W / 2, 514, 14, MUTED, CENTER, 400);
+  txt(res.st === 3 ? 'Smooth, steady strokes.' : 'Try shorter strokes that stay on the teeth.', W / 2, 536, 14, MUTED, CENTER, 400);
+  txt('Best on ' + LV[level].name + ': ' + res.best + '%', W / 2, 558, 14, MUTED, CENTER, 400);
+  if (level < 2) {
+    btn('Next Level', 30, 574, 330, 52, 'primary', () => startLevel(level + 1));
+    btn('Try Again', 30, 632, 330, 52, 'secondary', () => startLevel(level));
+  } else {
+    btn('Try Again', 30, 574, 330, 52, 'primary', () => startLevel(level));
+    btn('Choose Level', 30, 632, 330, 52, 'secondary', () => { scr = 'select'; });
+  }
+  btn('Home', 30, 690, 330, 52, 'secondary', goHome);
+}
+function finish() {
+  const acc = round(100 * onT / max(tot, 1)), sec = round((millis() - t0) / 1000), st = acc >= 80 ? 3 : acc >= 60 ? 2 : 1;
+  let best = acc;
+  try {
+    const b = savedBest();
+    if (b[level]) best = max(best, b[level].acc);
+    if (!b[level] || acc > b[level].acc) b[level] = {acc, st};
+    localStorage.setItem('fms', JSON.stringify(b));
+  } catch (e) {}
+  res = {acc, sec, st, best, at: millis()};
+}
+function draw() {
+  btns = [];
+  cursor(ARROW);
+  background(BG);
+  if (scr === 'select') selectScr(); else if (scr === 'how') how(); else play();
+}
+</script>
+</body>
+</html>
