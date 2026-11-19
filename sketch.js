@@ -12,6 +12,9 @@
 //   just pass each event to whichever page is showing.
 // =============================================
 
+// The Google Form people fill out after playing (the "Give Feedback" button on the Home screen opens it)
+const FEEDBACK_FORM_URL = "https://docs.google.com/forms/d/1zj5WUxsqXWPUQZik1R__T0A8L9M651tdLypHqhg80Ag/viewform";
+
 let page = null;        // the page that is showing now
 let nextPage = "home.html";   // the page to show next (start on Welcome)
 
@@ -1783,7 +1786,11 @@ function homePage() {
       { id: "profile",  x: 20,  y: 635, w: 170, h: 56,
         msg: "👤 Opening your Profile..." },
       { id: "settings", x: 200, y: 635, w: 170, h: 56,
-        msg: "⚙️ Opening Settings..." }
+        msg: "⚙️ Opening Settings..." },
+
+      // feedback form (opens the Google Form)
+      { id: "feedback", x: 20, y: 703, w: 350, h: 44,
+        msg: "📝 Opening the feedback form..." }
     ];
 
     for (let it of items) it.s = 1;   // s = size for the bounce animation
@@ -1902,6 +1909,17 @@ function homePage() {
       text("Profile", -22, 1);
     }
 
+    else if (it.id === "feedback") {
+      card(it.w, it.h, BLUE, 16);
+      noStroke();
+      fill(255);
+      textAlign(CENTER, CENTER);
+      textStyle(BOLD);
+      textSize(18);
+      text("Give Feedback", 0, 1);
+      textStyle(NORMAL);
+    }
+
     else if (it.id === "settings") {
       card(it.w, it.h, "#FFFFFF", 16);
       drawGear(-45, 0, 11, BLUE, "#FFFFFF");
@@ -1953,6 +1971,12 @@ function homePage() {
         settings: "password.html"
       };
       let page = pages[pressedItem.id];
+      if (pressedItem.id === "feedback") {
+        // open the Google Form (same tab, so it works on phones too; the Back button returns here)
+        setTimeout(() => {
+          window.location.assign(FEEDBACK_FORM_URL);
+        }, 400);
+      }
       if (page) {
         // wait a moment so the bounce and message are seen
         setTimeout(() => {
