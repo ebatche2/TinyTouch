@@ -10,6 +10,7 @@ html,body{margin:0;padding:0}
 canvas{display:block;touch-action:none}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<script src="game-music.js?v=4"></script>
 <script src="https://unpkg.com/ml5@1.2.2/dist/ml5.min.js"></script>
 </head>
 <body>
@@ -114,6 +115,7 @@ function startLevel(l) {
     }));
   }
   last = null; onT = 0; tot = 0; t0 = 0; doneAt = 0; res = null; paused = false; seen = millis(); scr = 'play';
+  gameMusic.setPlaying(true, "teeth");
 }
 function drawTooth(t) {
   const r = min(t.w * 0.4, t.h * 0.45), clean = t.clean >= 1;
@@ -293,7 +295,11 @@ function play() {
     } else last = null;
   }
   const pr = teeth.reduce((a, t) => a + t.clean, 0) / teeth.length;
-  if (!res && !paused && pr >= 1 && !doneAt) doneAt = now;
+  if (!res && !paused && pr >= 1 && !doneAt) {
+    doneAt = now;
+    gameMusic.setPlaying(false);
+    gameSounds.complete("teeth", { finalRound: true });
+  }
   if (!res && !paused && doneAt && now - doneAt > 700) finish();
   if (res) { drawResult(); return; }
 
@@ -328,13 +334,14 @@ function topBar(pr) {
 }
 function drawPause() {
   btns = [];                        // nothing underneath can be tapped while paused
-  push(); noStroke(); fill(27, 42, 90, 150); rect(0, 0, W, H); fill(255); rect(45, 200, 300, 372, 24); pop();
+  push(); noStroke(); fill(27, 42, 90, 150); rect(0, 0, W, H); fill(255); rect(45, 200, 300, 432, 24); pop();
   txt('Paused', W / 2, 245, 26, NAVY, CENTER);
   txt(mode === 'camera' ? 'Your hand is not being tracked.' : 'Your progress is saved here.', W / 2, 277, 15, MUTED, CENTER, 400);
   btn('Resume', 75, 300, 240, 52, 'primary', () => { paused = false; seen = millis(); });
   btn('Restart', 75, 367, 240, 52, 'secondary', () => startLevel(level));
   btn('Change level', 75, 434, 240, 52, 'secondary', () => { paused = false; scr = 'select'; });
   btn('Home', 75, 501, 240, 52, 'secondary', goHome);
+  btn(gameMusic.label(), 75, 564, 240, 52, 'secondary', gameMusic.toggle);
 }
 // The results page, laid out like the Car Obstacles one
 function drawResult() {
@@ -379,6 +386,7 @@ function draw() {
   cursor(ARROW);
   background(BG);
   if (scr === 'select') selectScr(); else if (scr === 'how') how(); else play();
+  gameMusic.setPlaying(scr === 'play' && !paused && !res && !doneAt, "teeth");
 }
 </script>
 </body>

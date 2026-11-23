@@ -71,6 +71,7 @@ function draw() {
   if (screen === "paused") drawPause();
   if (screen === "results") drawResults();
   if (screen === "leave") drawLeave();
+  gameMusic.setPlaying(screen === "playing", "shapes");
   pop();
 }
 
@@ -210,6 +211,7 @@ function startRound(freshLayout = true) {
     });
   }
   screen = "playing";
+  gameMusic.setPlaying(true, "shapes");
 }
 
 function drawGame() {
@@ -402,13 +404,14 @@ function drawPause() {
   fill(27, 42, 90, 150);
   rect(0, 0, 390, 760);
   fill(255);
-  rect(45, 200, 300, 372, 24);
+  rect(45, 200, 300, 432, 24);
   words("Paused", center, 245, 26, NAVY, true);
   words(practice ? "Your shapes are safe here." : "Your timer is paused.", center, 277, 15, MUTED);
   button("Resume", 75, 300, 240, 52, "primary", () => { screen = "playing"; });
   button("Restart", 75, 367, 240, 52, "secondary", () => startRound(false));
   button("Change level", 75, 434, 240, 52, "secondary", () => requestLeave("levels"));
   button("Home", 75, 501, 240, 52, "secondary", () => requestLeave("home"));
+  button(gameMusic.label(), 75, 564, 240, 52, "secondary", gameMusic.toggle);
 }
 
 function finish(ranOutOfTime) {
@@ -683,6 +686,8 @@ function mouseReleased() {
     matched++;
     giveFeedback("Matched! Nice work.", matched === shapes.length ? "You matched every shape!" : (shapes.length - matched) + " shapes left. Keep going!", GREEN);
     if (matched === shapes.length) {
+      gameMusic.setPlaying(false);
+      gameSounds.complete("shapes", { finalRound: roundNumber === 3 });
       completedAt = playTime;
       screen = "finishing";
     }

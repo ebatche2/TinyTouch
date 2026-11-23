@@ -46,7 +46,12 @@ function goTo(name) {
     window.location.assign("teeth.html?from=app");
     return;
   }
-  if (PAGES[name]) nextPage = name;
+  if (PAGES[name]) {
+    nextPage = name;
+    if (name === "trace-play.html") gameMusic.setPlaying(true, "trace");
+    else if (name === "carobs-play.html") gameMusic.setPlaying(true, "car");
+    else gameMusic.setPlaying(false);
+  }
   else console.log("No page called " + name);
 }
 
@@ -3404,6 +3409,7 @@ function tracePlayPage() {
   // Draw
   // =============================================
   function draw() {
+    gameMusic.setPlaying(!paused && !finished, "trace");
     cursor(ARROW);
     drawScenery();
     drawPath();
@@ -3588,7 +3594,7 @@ function tracePlayPage() {
     fill(27, 42, 90, 150);
     rect(0, 0, width, height);
     fill(255);
-    rect(45, 230, 300, 300, 24);
+    rect(45, 230, 300, 360, 24);
     fill(NAVY);
     textSize(26);
     textStyle(BOLD);
@@ -3598,6 +3604,7 @@ function tracePlayPage() {
     drawButton("Resume", 75, 315, 240, 52, true);
     drawButton("Restart", 75, 382, 240, 52, false);
     drawButton("Home", 75, 449, 240, 52, false);
+    drawButton(gameMusic.label(), 75, 516, 240, 52, false);
   }
 
   // =============================================
@@ -3610,6 +3617,7 @@ function tracePlayPage() {
       if (isOver(75, 315, 240, 52)) paused = false;
       if (isOver(75, 382, 240, 52)) restart();
       if (isOver(75, 449, 240, 52)) goTo("entry.html");
+      if (isOver(75, 516, 240, 52)) gameMusic.toggle();
       return;
     }
 
@@ -3680,8 +3688,8 @@ function tracePlayPage() {
     user.lastTrace = { accuracy: accuracy, level: level, path: pathNum };
     saveUser(user);
 
-    if (accuracy >= 70) playNotes([523, 659, 784, 1047], 0.12, "triangle");   // happy sound
-    else playNotes([523, 466, 392], 0.18, "sine");                             // "aww" sound
+    gameMusic.setPlaying(false);
+    gameSounds.complete("trace", { finalRound: pathNum === 3, passed: accuracy >= 70 });
   }
 
   function restart() {
@@ -4649,6 +4657,7 @@ function carPlayPage() {
   // Draw
   // =============================================
   function draw() {
+    gameMusic.setPlaying(!paused && !finished, "car");
     cursor(ARROW);
 
     if (!paused) carX = lerp(carX, targetX, 0.25);     // slide toward the lane
@@ -4746,8 +4755,8 @@ function carPlayPage() {
     user.carBest[level] = max(user.carBest[level] || 0, accuracy);
     saveUser(user);
 
-    if (accuracy >= 70) playNotes([523, 659, 784, 1047], 0.12, "triangle");   // happy sound
-    else playNotes([523, 466, 392], 0.18, "sine");                             // "aww" sound
+    gameMusic.setPlaying(false);
+    gameSounds.complete("car", { finalRound: roundNum === 3, passed: accuracy >= 70 });
   }
 
   function restart() {
@@ -4868,7 +4877,7 @@ function carPlayPage() {
     fill(27, 42, 90, 150);
     rect(0, 0, width, height);
     fill(255);
-    rect(45, 230, 300, 300, 24);
+    rect(45, 230, 300, 360, 24);
     fill(NAVY);
     textSize(26);
     textStyle(BOLD);
@@ -4878,6 +4887,7 @@ function carPlayPage() {
     drawButton("Resume", 75, 315, 240, 52, true);
     drawButton("Restart", 75, 382, 240, 52, false);
     drawButton("Home", 75, 449, 240, 52, false);
+    drawButton(gameMusic.label(), 75, 516, 240, 52, false);
   }
 
   // =============================================
@@ -4890,6 +4900,7 @@ function carPlayPage() {
       if (isOver(75, 315, 240, 52)) paused = false;
       if (isOver(75, 382, 240, 52)) restart();
       if (isOver(75, 449, 240, 52)) goTo("entry.html");
+      if (isOver(75, 516, 240, 52)) gameMusic.toggle();
       return;
     }
 
